@@ -48,7 +48,7 @@ export class IngestionJobs {
   });
  }
  validateTimeout(timeoutMs:number){if(!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>120000||timeoutMs>=this.leaseMs)throw new Error('Timeout must be below lease');}
- async finish(owner:string,job:Job,error?:'processing_failed'|'timeout'){
+ async finish(owner:string,job:Job,error?:'processing_failed'|'timeout'|'invalid_response'|'wrong_source'){
   // Worker output cannot create or update accepted state. M2b will add validated
   // proposals inside this same fenced transaction, never after completion.
   const result=await this.db.query("UPDATE ingestion_jobs SET status=$4,lease_expires_at=NULL,error_code=$5,updated_at=now() WHERE id=$1 AND owner_id=$2 AND attempt=$3 AND status='running' AND lease_expires_at>now() RETURNING id",[job.id,owner,job.attempt,error?'failed':'complete',error??null]);
@@ -67,5 +67,5 @@ export async function runOne(jobs:IngestionJobs,owner:string,processSource:(sour
 }
 
 export function configuredJobs(db:Database,env:Record<string,string|undefined>=process.env){
- return new IngestionJobs(db,'text-foundation-v1',Number(env.INGESTION_MAX_ATTEMPTS??3),Number(env.INGESTION_LEASE_MS??60000),Number(env.INGESTION_TEXT_LIMIT??100000),Number(env.INGESTION_SOURCE_LIMIT??20),Number(env.INGESTION_BYTE_LIMIT??2097152));
+ return new IngestionJobs(db,env.INGESTION_EXTRACTOR_VERSION??'text-foundation-v1',Number(env.INGESTION_MAX_ATTEMPTS??3),Number(env.INGESTION_LEASE_MS??60000),Number(env.INGESTION_TEXT_LIMIT??100000),Number(env.INGESTION_SOURCE_LIMIT??20),Number(env.INGESTION_BYTE_LIMIT??2097152));
 }
