@@ -42,3 +42,9 @@ test('mock declines range and hedge paragraphs rather than selecting a bound',as
 test('unbound to and from wording remains a supported offer',async()=>{
  for(const text of ['Offer to you: GBP 52,000 annually.','Offer from the employer: GBP 52,000 annually.']){const s=source(text);assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates.map(c=>c.value),['52000']);}
 });
+test('mock declines oversized paragraphs before running the amount regex',async()=>{
+ const s=source('Offer: '+'1 '.repeat(50000));assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates,[]);
+});
+test('ISO and named deadlines do not turn a supported offer into a money range',async()=>{
+ for(const text of ['Offer: GBP 52,000 annually. Reply by 2026-10-05.','Offer: GBP 52,000 annually, valid from 5 October.']){const s=source(text);assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates.map(c=>c.value),['52000']);}
+});

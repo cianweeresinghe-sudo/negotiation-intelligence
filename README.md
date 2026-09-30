@@ -113,3 +113,5 @@ The synthetic offer parser declines paragraphs containing listed first-person or
 Working synthetic paste sample: `Offer: GBP 52,000 annually`. The paste-box placeholder and walkthroughs use this supported format. Known gap: `Offer letter attached.\nTarget: GBP 48,000 annually (don't mention).` still yields base 48000 because the privacy wording is not one of the markers. Keep synthetic demo wording plain and review each quote; do not treat this parser as an authority detector.
 
 The mock also declines range/hedge paragraphs rather than selecting a bound. It cannot tell whose number is whose: check the quote before accepting and use plain wording. General validator handling of ranged/hedged amounts remains a real-adapter gate.
+
+The mock declines paragraphs longer than 4,000 characters before amount matching. ISO and named calendar dates are masked for range/hedge detection, so a supported offer can include a dated deadline. It still extracts only base in the synthetic format; enter other fields manually.
