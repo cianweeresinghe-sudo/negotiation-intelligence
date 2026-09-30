@@ -13,6 +13,7 @@ export default async function Home() {
         <p>Extracting a proposal does not change the workbook.</p></section></div>
     <section><h2>Next step</h2><p>{demo.advice.recommended_action}</p>
       <p>{demo.advice.situation}</p><p className="muted">Supporting source: synthetic-offer. This is unresolved material, not accepted state.</p></section>
+    <p><a href="/workbook">Open the local manual workbook</a></p>
     <footer>Only a built-in synthetic offer is processed. Accounts, uploads, persistence and sending are not enabled.</footer>
   </main>;
 }

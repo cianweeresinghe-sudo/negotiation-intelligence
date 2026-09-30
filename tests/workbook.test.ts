@@ -1,0 +1,119 @@
+import test,{before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { PGlite } from '@electric-sql/pglite';
+import { postgresDatabase, migrate, appDatabase, type Database } from '../src/workbook/database';
+import { Workbook,WorkbookError } from '../src/workbook/service';
+import { requireCurrentOwner,DEMO_OWNERS } from '../src/workbook/identity';
+import { guardRequest,parseBody } from '../src/workbook/runtime';
+import { entryInput,createCaseInput } from '../src/workbook/input';
+const server=!!process.env.TEST_DATABASE_URL;
+let db:Database,app:Database,w:Workbook;
+const A=DEMO_OWNERS.alice,B=DEMO_OWNERS.bob;
+const entry={field:'base',value:'50000',currency:'GBP',period:'annual',epistemicType:'counterparty_claim',sensitivity:'private',expectedRevision:0};
+before(async()=>{
+ if(server){const url=new URL(process.env.TEST_DATABASE_URL!);assert.equal(url.pathname,'/workbook_test');assert.ok(['localhost','127.0.0.1'].includes(url.hostname));db=postgresDatabase(url.toString());}
+ else {const pg=new PGlite();db={query:async <T>(sql:string,values?:unknown[])=>sql.includes(';')&&!values ? (await pg.exec(sql),{rows:[] as T[]}) : ({rows:(await pg.query(sql,values)).rows as T[]}),transaction:run=>pg.transaction(tx=>run({query:async <T>(sql:string,values?:unknown[])=>sql.includes(';')&&!values ? (await tx.exec(sql),{rows:[] as T[]}) : ({rows:(await tx.query(sql,values)).rows as T[]})})),close:()=>pg.close()};}
+ await migrate(db);await migrate(db);app=appDatabase(db);w=new Workbook(app);
+});
+after(async()=>{await db.close();});
+async function fresh(owner:string=A){return w.create(owner,{title:`Synthetic ${randomUUID()}`});}
+async function fails404(p:Promise<unknown>){await assert.rejects(p,(e:unknown)=>e instanceof WorkbookError&&e.status===404);}
+test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,1);});
+test('all owner entry points reject foreign IDs identically',async()=>{
+ const c=await fresh(),other=await fresh(B);const added=await w.add(A,c.id,entry);
+ assert.ok(!(await w.list(B)).some(x=>x.id===c.id));
+ await fails404(w.read(B,c.id));await fails404(w.history(B,c.id));
+ await fails404(w.update(B,c.id,{title:'forged',expectedRevision:1}));await fails404(w.remove(B,c.id,1));
+ await fails404(w.add(B,c.id,{...entry,expectedRevision:1}));await fails404(w.correct(B,c.id,added.id,{...entry,expectedRevision:1}));
+ await fails404(w.correct(B,other.id,added.id,entry));await fails404(w.resolve(B,c.id,randomUUID(),{expectedRevision:1,keepAssertionId:added.id}));
+ assert.equal((await w.read(A,c.id)).negotiation.revision,1);
+});
+test('correction retains original source, supersession and audit after service reload',async()=>{
+ const c=await fresh();const old=await w.add(A,c.id,entry);const next=await w.correct(A,c.id,old.id,{...entry,value:'52000',expectedRevision:1,sensitivity:'shareable'});
+ const reloaded=await new Workbook(app).read(A,c.id);assert.equal(reloaded.negotiation.revision,2);assert.equal(reloaded.negotiation.material_version,2);
+ assert.equal(reloaded.assertions.find(a=>a.id===old.id)?.status,'superseded');assert.equal(reloaded.assertions.find(a=>a.id===next.id)?.supersedes_id,old.id);
+ assert.equal(reloaded.assertions.find(a=>a.id===next.id)?.sensitivity,'private');assert.equal(reloaded.sources.length,2);assert.equal((await w.history(A,c.id)).length,3);
+ assert.ok(reloaded.sources.some(s=>String(s.original_text).includes('50000')));
+});
+test('stale writes and failed partial changes leave revision and history unchanged',async()=>{
+ const c=await fresh();await w.add(A,c.id,entry);const before=await w.read(A,c.id);const history=await w.history(A,c.id);
+ await assert.rejects(w.add(A,c.id,{...entry,field:'note',expectedRevision:0}),(e:unknown)=>e instanceof WorkbookError&&e.status===409);
+ await assert.rejects(w.add(A,c.id,{...entry,expectedRevision:1}),(e:unknown)=>e instanceof WorkbookError&&e.status===409);
+ assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual(await w.history(A,c.id),history);
+});
+test('SQL composite foreign keys reject cross-case sources and evidence',async()=>{
+ const a=await fresh(),b=await fresh(B);await w.add(A,a.id,entry);const source=(await w.read(A,a.id)).sources[0];
+ await assert.rejects(db.query('INSERT INTO evidence(id,case_id,owner_id,source_id,quote,start_offset,end_offset) VALUES($1,$2,$3,$4,\'x\',0,1)',[randomUUID(),b.id,B,source.id]));
+ await assert.rejects(db.query('INSERT INTO sources(id,case_id,owner_id,kind,original_text,checksum,sensitivity) VALUES($1,$2,$3,\'manual\',\'x\',\'hash\',\'private\')',[randomUUID(),a.id,B]));
+});
+test('append-only event trigger blocks updates/deletes and source originals remain immutable',async()=>{
+ const c=await fresh();await w.add(A,c.id,entry);
+ await assert.rejects(db.query('UPDATE events SET operation=\'tampered\' WHERE case_id=$1',[c.id]));
+ await assert.rejects(db.query('DELETE FROM events WHERE case_id=$1',[c.id]));
+ await assert.rejects(db.query('UPDATE sources SET original_text=\'tampered\' WHERE case_id=$1',[c.id]));
+});
+test('explicit conflict resolution preserves superseded claims and authoritative membership',async()=>{
+ const c=await fresh();const first=await w.add(A,c.id,entry);const second=await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});
+ const detail=await w.read(A,c.id);assert.equal(detail.conflicts.length,1);assert.equal(detail.assertions.filter(a=>a.status==='active').length,2);
+ const conflictId=String(detail.conflicts[0].id);
+ await w.resolve(A,c.id,conflictId,{expectedRevision:2,keepAssertionId:second.id});
+ const result=await w.read(A,c.id);assert.equal(result.conflicts[0].status,'resolved');assert.equal(result.assertions.find(a=>a.id===first.id)?.status,'superseded');
+ assert.ok(result.assertions.every(a=>a.conflict_group_id===conflictId));
+ const history=await db.query("SELECT * FROM event_assertion_refs WHERE event_id=$1 AND direction='before'",[result.conflicts[0].resolution_event_id]);assert.equal(history.rows.length,2);
+});
+test('case deletion cascades every child without orphan history',async()=>{
+ const c=await fresh();await w.add(A,c.id,entry);await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});await w.remove(A,c.id,2);await fails404(w.read(A,c.id));
+ for(const table of ['assertions','sources','evidence','events','conflicts','event_assertion_refs']){const rows=await db.query(`SELECT * FROM ${table} WHERE case_id=$1`,[c.id]);assert.equal(rows.rows.length,0,table);}
+});
+test('input rejects forged owner, inference direct writes, floats and oversized text',()=>{
+ assert.throws(()=>createCaseInput.parse({title:'Synthetic',ownerId:B}));assert.throws(()=>entryInput.parse({...entry,epistemicType:'ai_inference'}));assert.throws(()=>entryInput.parse({...entry,value:50000}));assert.throws(()=>entryInput.parse({...entry,value:'x'.repeat(2001)}));assert.throws(()=>entryInput.parse({...entry,ownerId:B}));
+});
+test('dev identity is configured server-side, supports two owners and refuses production',()=>{
+ assert.equal(requireCurrentOwner({ALLOW_SYNTHETIC_IDENTITY:'1',NODE_ENV:'development',DEMO_USER:'alice'}),A);assert.equal(requireCurrentOwner({ALLOW_SYNTHETIC_IDENTITY:'1',NODE_ENV:'development',DEMO_USER:'bob'}),B);
+ assert.throws(()=>requireCurrentOwner({NODE_ENV:'production',DEMO_USER:'alice'}));assert.throws(()=>requireCurrentOwner({NODE_ENV:'development'}));
+});
+test('request boundary rejects remote origins and capped bodies',async()=>{
+ assert.throws(()=>guardRequest(new Request('http://127.0.0.1:3000/api/cases',{method:'POST',headers:{origin:'https://attacker.example'}})));
+ assert.throws(()=>guardRequest(new Request('http://attacker.example/api/cases')));
+ await assert.rejects(parseBody(new Request('http://127.0.0.1/api/cases',{method:'POST',headers:{'content-type':'application/json'},body:'x'.repeat(10001)})),(e:unknown)=>e instanceof WorkbookError&&e.status===413);
+});
+test('server Postgres concurrency: same revision has exactly one winner',{skip:!server},async()=>{
+ const c=await fresh();const results=await Promise.allSettled([w.add(A,c.id,entry),w.add(A,c.id,{...entry,field:'note'})]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+ assert.equal((await w.read(A,c.id)).negotiation.revision,1);assert.equal((await w.history(A,c.id)).length,2);
+});
+test('server Postgres app role cannot update/delete events',{skip:!server},async()=>{
+ const c=await fresh();await assert.rejects(app.query('UPDATE events SET operation=\'tampered\' WHERE case_id=$1',[c.id]),(e:unknown)=>(e as {code:string}).code==='42501');
+ await assert.rejects(app.query('DELETE FROM events WHERE case_id=$1',[c.id]),(e:unknown)=>(e as {code:string}).code==='42501');
+});
+test('database rejects cross-case conflict/history links and duplicate uncontested fields',async()=>{
+ const a=await fresh(),b=await fresh(B);const aa=await w.add(A,a.id,entry);await w.add(B,b.id,entry);await w.add(B,b.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});
+ const foreign=(await w.read(B,b.id)).conflicts[0];
+ await assert.rejects(db.query('UPDATE assertions SET conflict_group_id=$1 WHERE id=$2',[foreign.id,aa.id]));
+ const foreignEvent=(await w.history(B,b.id))[0];
+ await assert.rejects(db.query('INSERT INTO event_assertion_refs(event_id,assertion_id,case_id,owner_id,direction) VALUES($1,$2,$3,$4,\'after\')',[foreignEvent.id,aa.id,a.id,A]));
+ await assert.rejects(db.query('INSERT INTO assertions(id,case_id,owner_id,field,value,currency,period,epistemic_type,sensitivity,source_id,evidence_id) SELECT $1,case_id,owner_id,field,value,currency,period,epistemic_type,sensitivity,source_id,evidence_id FROM assertions WHERE id=$2',[randomUUID(),aa.id]),(e:unknown)=>(e as {code:string}).code==='23505');
+});
+test('audit failure rolls back inserted assertion, original, evidence and revision',async()=>{
+ const c=await fresh();const before=await w.read(A,c.id),history=await w.history(A,c.id);
+ const fault:Database={...app,transaction:run=>app.transaction(tx=>run({query:async <T>(sql:string,values?:unknown[])=>{if(sql.startsWith('INSERT INTO events'))throw new Error('synthetic fault');return tx.query<T>(sql,values);}}))};
+ await assert.rejects(new Workbook(fault).add(A,c.id,entry),/synthetic fault/);
+ assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual(await w.history(A,c.id),history);
+});
+
+test('origin guard handles Next URL normalization without permitting remote hosts',()=>{
+ assert.doesNotThrow(()=>guardRequest(new Request('http://localhost:3101/api/cases',{method:'POST',headers:{host:'127.0.0.1:3101',origin:'http://127.0.0.1:3101'}})));
+ assert.throws(()=>guardRequest(new Request('http://localhost:3101/api/cases',{method:'POST',headers:{host:'attacker.example',origin:'http://attacker.example'}})));
+});
+
+test('server Postgres app role cannot rewrite assertion values/evidence/owner',{skip:!server},async()=>{
+ const c=await fresh();const a=await w.add(A,c.id,entry);
+ for(const sql of ["UPDATE assertions SET value='\"tampered\"'::jsonb WHERE id=$1","UPDATE assertions SET owner_id=owner_id WHERE id=$1","UPDATE assertions SET evidence_id=evidence_id WHERE id=$1"])
+  await assert.rejects(app.query(sql,[a.id]),(e:unknown)=>(e as {code:string}).code==='42501');
+});
+test('correction in a conflict preserves a single authoritative membership chain',async()=>{
+ const c=await fresh();const first=await w.add(A,c.id,entry);await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});
+ const next=await w.correct(A,c.id,first.id,{...entry,value:'52000',expectedRevision:2});
+ const result=await w.read(A,c.id);const group=String(result.conflicts[0].id);
+ assert.ok(result.assertions.every(a=>a.conflict_group_id===group));assert.equal(result.assertions.find(a=>a.id===next.id)?.supersedes_id,first.id);
+});
