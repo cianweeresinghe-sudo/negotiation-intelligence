@@ -16,7 +16,7 @@ export async function reviewBrowser(origin:string,database:string){
   const db=postgresDatabase(database);try{await db.query('UPDATE ingestion_jobs SET advisory_unknowns=$2::jsonb,advisory_conflicts=$3::jsonb WHERE case_id=$1',[caseId,JSON.stringify(['Unknown <img src=x onerror=alert(1)>']),JSON.stringify(['Conflict [details](https://example.com)'])]);}finally{await db.close();}
   await page.reload();await page.getByRole('button',{name:title,exact:true}).click();await page.getByText('Unknown <img src=x onerror=alert(1)>',{exact:true}).waitFor();assert.equal(await page.locator('img').count(),0);assert.equal(await page.getByRole('link',{name:'details',exact:true}).count(),0);
   mkdirSync('artifacts',{recursive:true});await page.screenshot({path:'artifacts/m2c-review.png',fullPage:true});
-  await page.getByRole('button',{name:'Accept reviewed value',exact:true}).click();await page.getByRole('heading',{name:'base: 52000 · accepted',exact:true}).waitFor();await page.screenshot({path:'artifacts/m2c-accepted.png',fullPage:true});
+  await page.getByRole('button',{name:'Accept reviewed value',exact:true}).click();await page.getByRole('heading',{name:'base: 52000 · accepted',exact:true}).waitFor();await page.getByText('Accepted from reviewed paste',{exact:true}).waitFor();await page.getByText('Accepted classification: counterparty_claim · private',{exact:true}).waitFor();await page.screenshot({path:'artifacts/m2c-accepted.png',fullPage:true});
   assert.deepEqual(errors,[]);console.log('PASS: Chromium import → quoted pending review → literal advisories → accept → accepted workbook; screenshots saved.');
  }finally{await browser.close();}
 }

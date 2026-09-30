@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
 type Candidate={field:string;value:string;currency:string|null;period:string|null;epistemic_type:string;sensitivity:string;confidence:string;confidence_rationale:string};
-type Proposal={id:string;candidate:Candidate;status:string;duplicate_of:string|null;target_assertion_ids:string[]};
+type Proposal={id:string;candidate:Candidate;status:string;duplicate_of:string|null;target_assertion_ids:string[];decision?:{accepted?:{epistemicType:string;sensitivity:string}}};
 type Active={id:string;field:string;value:string;status:string;currency?:string|null;period?:string|null;epistemic_type?:string};
 export function Advisory({text}:{text:string}){return <pre>{text}</pre>;}
 type JobOutcomeRow={drop_counts?:Record<string,number>;advisory_unknowns?:string[];advisory_conflicts?:string[]};
@@ -25,7 +25,7 @@ function Card({proposal:p,quotes,active,revision,busy,submit}:{proposal:Proposal
  const equal=active.length===1&&active[0].value===value&&active[0].currency===c.currency&&active[0].period===c.period;
  const changed=JSON.stringify(active.map(a=>a.id).sort())!==JSON.stringify([...p.target_assertion_ids].sort());
  const edits={...(value!==c.value?{value}:{}),...(type!==c.epistemic_type?{epistemicType:type}:{})};
- return <article><h3>{c.field}: {c.value} · {p.status}</h3><p>{c.epistemic_type} · {c.sensitivity} · confidence {c.confidence}</p><Advisory text={c.confidence_rationale}/>{quotes.map((q,i)=><blockquote key={i}><Advisory text={q}/></blockquote>)}
+ return <article><h3>{c.field}: {c.value} · {p.status}</h3><p>Original proposal: {c.epistemic_type} · {c.sensitivity} · confidence {c.confidence}</p>{p.status==='accepted'&&p.decision?.accepted&&<p>Accepted classification: {p.decision.accepted.epistemicType} · {p.decision.accepted.sensitivity}</p>}<Advisory text={c.confidence_rationale}/>{quotes.map((q,i)=><blockquote key={i}><Advisory text={q}/></blockquote>)}
  {p.duplicate_of&&<p>Duplicate of pending proposal {p.duplicate_of}</p>}
  {p.status==='pending'&&<><label>Reviewed value<input value={value} onChange={e=>setValue(e.target.value)} maxLength={2000}/></label><label>Classification<select value={type} onChange={e=>setType(e.target.value)}><option value="ai_inference">AI inference — choose an explicit classification</option>{['counterparty_claim','documented_observation','user_assumption','user_constraint'].map(t=><option key={t}>{t}</option>)}</select></label>
  {active.map(a=><p key={a.id}>Current: {a.value} · {a.epistemic_type}</p>)}
