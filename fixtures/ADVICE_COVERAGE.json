@@ -4,5 +4,7 @@
   "uncited_sentence": "The employer has unlimited budget.",
   "expected_uncited_result": "blocked",
   "cited_sentence": "The proposed base is a counterparty claim.",
-  "expected_cited_result": "allowed"
+  "expected_cited_result": "allowed",
+  "uncited_question_sentence": "The employer has unlimited budget?",
+  "expected_uncited_question_result": "blocked"
 }

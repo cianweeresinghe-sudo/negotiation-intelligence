@@ -61,3 +61,17 @@ test('demo preserves original and keeps proposals out of accepted state', async 
   const result = await buildDemo(); assert.equal(result.source.text, SYNTHETIC_TEXT);
   assert.equal(result.proposals.length, 1); assert.deepEqual(result.acceptedAssertions, []);
 });
+
+test('question punctuation cannot bypass coverage outside the question field', async () => {
+  for (const field of ['situation', 'recommended_action', 'intended_effect', 'rationale', 'main_risk', 'alternative', 'draft']) {
+    const adapter = new MockModelAdapter(); const raw = await adapter.advise() as any;
+    raw[field] = `${raw[field] ?? ''} ${fixture.uncited_question_sentence}`.trim();
+    await assert.rejects(getAdvice({ extract: s => adapter.extract(s), advise: async () => raw }, context), /Uncovered statement/);
+  }
+});
+test('dedicated decision question is allowed; declarative text there still needs coverage', async () => {
+  const adapter = new MockModelAdapter(); await getAdvice(adapter, context);
+  const raw = await adapter.advise() as any;
+  raw.decision_changing_question = fixture.uncited_sentence;
+  await assert.rejects(getAdvice({ extract: s => adapter.extract(s), advise: async () => raw }, context), /Uncovered statement/);
+});

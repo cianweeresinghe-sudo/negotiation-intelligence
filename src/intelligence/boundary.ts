@@ -9,7 +9,7 @@ export async function extractProposals(adapter: ModelAdapter, source: Source, re
   })) };
 }
 // Conservative scaffold check, not a semantic truth/coverage evaluator. Every
-// declarative sentence in displayed prose requires an exact per-path claim.
+// sentence outside the dedicated question field requires an exact per-path claim.
 export function checkClaimCoverage(advice: Advice, context: Context): string[] {
   const problems: string[] = [];
   const prose = ['situation', 'recommended_action', 'intended_effect', 'rationale', 'main_risk', 'alternative', 'decision_changing_question', 'draft'] as const;
@@ -24,7 +24,7 @@ export function checkClaimCoverage(advice: Advice, context: Context): string[] {
     const value = advice[key];
     if (!value) continue;
     for (const sentence of value.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean)) {
-      if (sentence.endsWith('?')) continue;
+      if (key === 'decision_changing_question' && sentence.endsWith('?')) continue;
       if (!advice.claims.some(c => c.output_path === `/${key}` && c.text === sentence && (c.evidence_ids.length || c.assertion_ids.length))) problems.push(`Uncovered statement at /${key}`);
     }
   }
