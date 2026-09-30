@@ -51,7 +51,7 @@ export class AdviceService{
  });}
  async history(owner:string,caseId:string){return this.db.transaction(async tx=>{
   await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');const c=await this.owned(tx,owner,caseId);
-  return (await tx.query<RecordRow>('SELECT * FROM advice_records WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at DESC,id DESC',[caseId,owner])).rows.map(row=>({...row,stale:row.revision!==c.revision||row.material_version!==c.material_version}));
+  return (await tx.query<RecordRow>('SELECT id,case_id,owner_id,revision,material_version,adapter_version,include_private_constraints,snapshot_hash,created_at,content FROM advice_records WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at DESC,id DESC',[caseId,owner])).rows.map(row=>({...row,stale:row.revision!==c.revision||row.material_version!==c.material_version}));
  });}
  async read(owner:string,caseId:string,id:string){return this.db.transaction(async tx=>{
   await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');const c=await this.owned(tx,owner,caseId);

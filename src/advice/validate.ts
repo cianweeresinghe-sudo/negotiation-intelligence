@@ -6,14 +6,17 @@ export const GENERIC_DRAFT='Thank you for the offer. Could we discuss the terms?
 const fail=(code:string):never=>{throw new AdviceValidationError(code);};
 // Exact decimal matching removes currency decorations, thousands separators and
 // trailing decimal zeros; k expands exactly. No rounding or range inference.
+const isoDate=/\b(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?(Z|[+-]\d{2}:\d{2})?)?(?!\d)/g;
+const namedDate=/\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December)(?:\s+(\d{4}))?\b/gi;
+function maskDates(text:string){return text.replace(isoDate,'').replace(namedDate,'');}
 export function numberTokens(text:string):string[]{
- const tokens=text.match(/(?<![\p{L}\d])[+-]?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d+)?[kKmM]?(?![\p{L}\d])/gu)??[];
+ const tokens=maskDates(text).replace(/\b(\d+)(?:st|nd|rd|th)\b/gi,'$1').match(/(?<![\p{L}\d])[+-]?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d+)?[kKmM]?(?![\p{L}\d])/gu)??[];
  return tokens.map(raw=>{const negative=raw.startsWith('-'),suffix=/[km]$/i.exec(raw)?.[0].toLowerCase(),clean=raw.replace(/[ ,+km]/gi,'').replace(/^-/,'');const [whole,part='']=clean.split('.');const shift=suffix==='k'?3:suffix==='m'?6:0;let digits=whole+part+'0'.repeat(Math.max(0,shift-part.length));let decimals=Math.max(0,part.length-shift);digits=digits.replace(/^0+(?=\d)/,'');if(decimals){digits=digits.padStart(decimals+1,'0');digits=digits.slice(0,-decimals)+'.'+digits.slice(-decimals);digits=digits.replace(/0+$/,'').replace(/\.$/,'');}return (negative?'-':'')+digits;});
 }
 const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
 function dateTokens(text:string){const result:string[]=[];
- for(const match of text.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g))result.push(`${match[1]}-${Number(match[2])}-${Number(match[3])}`);
- for(const match of text.matchAll(/\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)(?:\s+(\d{4}))?\b/gi))result.push(`${match[3]??''}-${months.indexOf(match[2].toLowerCase())+1}-${Number(match[1])}`);
+ for(const match of text.matchAll(isoDate))result.push(`${match[1]}-${Number(match[2])}-${Number(match[3])}${match[4]?`T${match[4]}:${match[5]}:${match[6]??'00'}${match[7]??''}`:''}`);
+ for(const match of text.matchAll(namedDate))result.push(`${match[3]??''}-${months.indexOf(match[2].toLowerCase())+1}-${Number(match[1])}`);
  return result;
 }
 function controls(value:unknown):boolean{if(typeof value==='string')return /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)||value.length>4000;if(Array.isArray(value))return value.some(controls);if(value&&typeof value==='object')return Object.values(value).some(controls);return false;}
@@ -43,17 +46,21 @@ export function validateAdviceOutput(raw:unknown,snapshot:AdviceSnapshot,privacy
   const cited=new Set([...claim.assertion_ids,...claim.evidence_ids.map(id=>knownEvidence.get(id)!.assertion_id)]);
   const support=[...claim.assertion_ids.map(id=>knownAssertions.get(id)!.value),...claim.evidence_ids.map(id=>knownEvidence.get(id)!.quote)].join('\n');
   const numbers=numberTokens(support),dates=dateTokens(support);
-  if(/\d[\d,. ]*[kKmM]?\s*(?:to|or|[-–—])\s*(?:(?:GBP|EUR|USD|[£€$])\s*)?\d/i.test(claim.text)||/\b(around|about|approximately|at least|up to|between)\s+(?:(?:GBP|EUR|USD|[£€$])\s*)?\d/i.test(claim.text))fail('unsupported_value');
+  const amountText=maskDates(claim.text);
+  if(/\d[\d,. ]*[kKmM]?\s*(?:to|or|[-–—])\s*(?:(?:GBP|EUR|USD|[£€$])\s*)?\d/i.test(amountText)||/\b(around|about|approximately|at least|up to|between)\s+(?:(?:GBP|EUR|USD|[£€$])\s*)?\d/i.test(amountText))fail('unsupported_value');
   if(numberTokens(claim.text).some(n=>!numbers.includes(n))||dateTokens(claim.text).some(d=>!dates.includes(d)))fail('unsupported_value');
   // Currency is part of a value, not an interchangeable display decoration.
   const currencies=[...claim.text.matchAll(/\b(GBP|EUR|USD)\b|[£€$]/g)].map(m=>m[1]??({'£':'GBP','€':'EUR','$':'USD'}[m[0]]));
   const supportedCurrencies=new Set([...claim.assertion_ids.map(id=>knownAssertions.get(id)!.currency),...claim.evidence_ids.map(id=>knownAssertions.get(knownEvidence.get(id)!.assertion_id)!.currency)]);
   if(currencies.some(c=>!supportedCurrencies.has(c??null)))fail('unsupported_value');
+  const supportedPeriods=new Set([...cited].map(id=>knownAssertions.get(id)!.period));
+  const periodRules:[RegExp,string][]=[[/\b(annual|annually|per year|yearly|per annum)\b/i,'annual'],[/\b(monthly|per month)\b/i,'monthly'],[/\b(one[ -]time|once)\b/i,'one_time']];
+  if(periodRules.some(([pattern,period])=>pattern.test(claim.text)&&!supportedPeriods.has(period)))fail('unsupported_value');
   for(const group of snapshot.conflicts){if(!group.assertionIds.some(id=>cited.has(id)))continue;
    if(group.assertionIds.some(id=>!cited.has(id)))fail('partial_conflict');
    // Deliberately conservative for the synthetic slice: clarify the dispute,
    // rather than repeat one disputed number/date as an established fact.
-   if(!/\b(unresolved|disputed|conflicting|uncertain|clarify)\b/i.test(claim.text)||numberTokens(claim.text).length)fail('conflict_presented_as_fact');
+   if(!/\b(unresolved|disputed|conflicting|uncertain|clarify)\b/i.test(claim.text)||numberTokens(claim.text).length||dateTokens(claim.text).length)fail('conflict_presented_as_fact');
   }
  }
  const factualClaims=advice.claims.filter(c=>!c.output_path.startsWith('/assumptions/')&&c.output_path!=='/draft');

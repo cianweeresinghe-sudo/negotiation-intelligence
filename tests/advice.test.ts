@@ -52,3 +52,30 @@ test('private floor missing from model snapshot is still checked by the outbound
 test('claims never reinterpret an exact cited amount as a range or rounded estimate',async()=>{
  for(const text of ['The base is about £52,000.','The base is £52,000 to £52,000.']){const v=await raw();rewrite(v,'situation',text);blocked(v,'unsupported_value');}
 });
+test('an exact ISO deadline is validated as a date rather than an amount range',async()=>{
+ const d:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],field:'deadline',value:'2026-10-05',currency:null,period:null}],evidence:[{...snapshot.evidence[0],quote:'Deadline 2026-10-05'}]};validateAdviceOutput(await raw(d),d);
+ const bad=await raw(d);rewrite(bad,'situation','The deadline is 2026-10-04.');blocked(bad,'unsupported_value',d);
+});
+test('full named-month date matches an ISO cited deadline while amount ranges stay blocked',async()=>{
+ const d:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],field:'deadline',value:'2026-10-05',currency:null,period:null}],evidence:[{...snapshot.evidence[0],quote:'5 October 2026'}]};const v=await raw(d);rewrite(v,'situation','The deadline is 5 October 2026.');validateAdviceOutput(v,d);
+ const range=await raw();rewrite(range,'situation','The base is £50,000 to £55,000.');blocked(range,'unsupported_value');
+});
+test('a bounded four-thousand-character numeric run cannot become supported advice',async()=>{
+ const v=await raw();rewrite(v,'situation','1 '.repeat(2000).trim());blocked(v,'unsupported_value');
+});
+test('period claims preserve the cited money basis in both directions',async()=>{
+ for(const period of ['annual','annually','per year','yearly']){const v=await raw();rewrite(v,'situation',`The reviewed base is £52,000 ${period}.`);validateAdviceOutput(v,snapshot);}
+ for(const period of ['monthly','per month','one-time']){const v=await raw();rewrite(v,'situation',`The reviewed base is £52,000 ${period}.`);blocked(v,'unsupported_value');}
+ const monthly:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],period:'monthly'}]};validateAdviceOutput(await raw(monthly),monthly);
+});
+test('ordinal dates preserve the exact day and never state one conflicted deadline',async()=>{
+ const d:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],field:'deadline',value:'4 October',currency:null,period:null}],evidence:[{...snapshot.evidence[0],quote:'4 October'}]};
+ const good=await raw(d);rewrite(good,'situation','The deadline is 4th October.');validateAdviceOutput(good,d);const bad=await raw(d);rewrite(bad,'situation','The deadline is 5th October.');blocked(bad,'unsupported_value',d);
+ const second=randomUUID(),group=randomUUID();const conflict:AdviceSnapshot={...d,assertions:[{...d.assertions[0],conflict_group_id:group},{...d.assertions[0],id:second,value:'5 October',conflict_group_id:group}],conflicts:[{id:group,assertionIds:[id,second]}]};
+ const v=await raw(conflict);rewrite(v,'situation','The unresolved deadline is 5th October.');blocked(v,'conflict_presented_as_fact',conflict);assert.deepEqual(numberTokens('1st, 2nd, 3rd, 5th'),['1','2','3','5']);
+});
+test('ISO timestamps match exactly rather than masquerading as numeric ranges',async()=>{
+ const d:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],field:'deadline',value:'2026-10-05T17:00:00',currency:null,period:null}],evidence:[{...snapshot.evidence[0],quote:'2026-10-05T17:00:00'}]};validateAdviceOutput(await raw(d),d);
+ const bad=await raw(d);rewrite(bad,'situation','The deadline is 2026-10-05T18:00:00.');blocked(bad,'unsupported_value',d);
+ const options=await raw();rewrite(options,'situation','There are 1 or 2 options.');blocked(options,'unsupported_value');
+});
