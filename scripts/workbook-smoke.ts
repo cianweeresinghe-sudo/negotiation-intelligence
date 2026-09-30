@@ -1,4 +1,5 @@
 import {reviewBrowser} from './review-browser';
+import {reviewPaths} from './review-browser-paths';
 import {Proposals,runProposalJob} from '../src/proposals/service';
 import {proposalMock} from '../src/proposals/mock';
 import {IngestionJobs} from '../src/ingestion/jobs';
@@ -48,7 +49,7 @@ try{
  await stop();await start('bob');assert.equal((await call(`/api/cases/${id}/imports`)).status,404);assert.equal((await call(`/api/cases/${id}/imports`,'POST',{text:'forged import'})).status,404);await stop();await start('alice');
  const afterImport=await call(`/api/cases/${id}`);assert.equal(afterImport.data.negotiation.revision,2);assert.equal(afterImport.data.assertions.length,2);
  const proposalDb=postgresDatabase(database!);try{
- const app=appDatabase(proposalDb),jobs=new IngestionJobs(app,'smoke-proposals-v1');await jobs.importText(DEMO_OWNERS.alice,id,{text:'😀 £52,000 annually'});
+ const app=appDatabase(proposalDb),jobs=new IngestionJobs(app,'smoke-proposals-v1');await jobs.importText(DEMO_OWNERS.alice,id,{text:'😀 Offer: £52,000 annually'});
  assert.equal(await runProposalJob(jobs,new Proposals(app),DEMO_OWNERS.alice,proposalMock,30000,id),true);
  }finally{await proposalDb.close();}
  const pending=await call(`/api/cases/${id}/proposals`);assert.equal(pending.status,200);assert.equal(pending.data.proposals.length,1);assert.equal(pending.data.evidence.length,1);
@@ -57,20 +58,20 @@ try{
  const proposalId=pending.data.proposals[0].id;
  await stop();await start('bob');
  for(const action of ['accept','edit','reject'])assert.equal((await call(`/api/cases/${id}/proposals/${proposalId}/${action}`,'POST',action==='reject'?{expectedRevision:2}:{expectedRevision:2,operation:'confirm',edits:{value:'52000'},acknowledgeProvenanceChange:true})).status,404);
- assert.equal((await call(`/api/cases/${id}/proposals/import`,'POST',{text:'£52,000 annually'})).status,404);
+ assert.equal((await call(`/api/cases/${id}/proposals/import`,'POST',{text:'Offer: £52,000 annually'})).status,404);
  await stop();await start('alice');assert.deepEqual((await call(`/api/cases/${id}`)).data,preBob.data);assert.equal((await call(`/api/cases/${id}/proposals`)).data.proposals[0].status,'pending');
  const accepted=await call(`/api/cases/${id}/proposals/${proposalId}/accept`,'POST',{expectedRevision:2,operation:'confirm',acknowledgeProvenanceChange:true});assert.equal(accepted.status,200,accepted.data.error);
  assert.equal((await call(`/api/cases/${id}/proposals/${proposalId}/reject`,'POST',{expectedRevision:3})).status,409);
  const demo=await call('/api/cases','POST',{title:'Synthetic import review demo'});const demoId=demo.data.id;
- assert.equal((await call(`/api/cases/${demoId}/proposals/import`,'POST',{text:'£52,000 annually'})).status,200);
+ assert.equal((await call(`/api/cases/${demoId}/proposals/import`,'POST',{text:'Offer: £52,000 annually'})).status,200);
  const demoProposal=(await call(`/api/cases/${demoId}/proposals`)).data.proposals[0];assert.ok(demoProposal);
  assert.equal((await call(`/api/cases/${demoId}/proposals/${demoProposal.id}/edit`,'POST',{expectedRevision:0,operation:'add',edits:{value:'200000'}})).status,422);
  assert.equal((await call(`/api/cases/${demoId}/proposals/${demoProposal.id}/edit`,'POST',{expectedRevision:0,operation:'add',edits:{epistemicType:'documented_observation'}})).status,200);
- await call(`/api/cases/${demoId}/proposals/import`,'POST',{text:'£53,000 annually'});
+ await call(`/api/cases/${demoId}/proposals/import`,'POST',{text:'Offer: £53,000 annually'});
  const rejectedProposal=(await call(`/api/cases/${demoId}/proposals`)).data.proposals.find((p:{status:string})=>p.status==='pending');assert.ok(rejectedProposal);
  const beforeReject=(await call(`/api/cases/${demoId}`)).data;
  assert.equal((await call(`/api/cases/${demoId}/proposals/${rejectedProposal.id}/reject`,'POST',{expectedRevision:1})).status,200);
  const afterReject=(await call(`/api/cases/${demoId}`)).data;assert.equal(afterReject.negotiation.revision,1);assert.deepEqual(afterReject.assertions,beforeReject.assertions);
- if(process.env.REVIEW_BROWSER==='1')await reviewBrowser(origin,database!);
+ if(process.env.REVIEW_BROWSER==='1'){await reviewBrowser(origin,database!);await reviewPaths(origin);}
  console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation, idempotent text import and killed-worker recovery, pending proposals, Bob review mutation isolation, paste import, edited acceptance, replay protection and rejection.');
 }finally{await stop();}

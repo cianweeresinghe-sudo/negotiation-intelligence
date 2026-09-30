@@ -11,6 +11,7 @@
     "worker:demo": "node --import tsx src/worker/main.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "workbook:smoke": "node --import tsx scripts/workbook-smoke.ts",
+    "fixtures:run": "node --import tsx scripts/fixture-runner.ts",
     "worker:ingestion": "node --import tsx src/worker/ingestion.ts",
     "worker:proposals": "node --import tsx src/worker/proposals.ts",
     "advice:smoke": "node --import tsx scripts/advice-smoke.ts"
