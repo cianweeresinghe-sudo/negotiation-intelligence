@@ -32,3 +32,26 @@ No accounts, database, private storage, uploads, review controls, persistence, a
 - [M1 provider comparison](docs/M1_COST_REGION_RETENTION.md)
 - [Extraction fixtures](fixtures/CASES.json) — the full fixture runner is a separate quality task
 - [Update loop](fixtures/UPDATE_LOOP.json)
+
+## M1 manual workbook (synthetic development)
+
+The `/workbook` route now provides persisted manual cases, entries, corrections and explicit disagreement resolution. All entries default private; AI inferences cannot be saved through the manual-entry endpoint. Accounts and managed authentication are still a live-release gate. The trusted identity seam accepts only server-configured `DEMO_USER=alice` or `bob` and refuses all workbook requests in production. Request headers/body cannot select an owner. The original static mock page is unchanged apart from a workbook link.
+
+Start a local PostgreSQL 17 server/database `workbook_dev`. If Docker is available, this example creates only a named synthetic database and binds to loopback:
+
+```sh
+docker run --name negotiation-synthetic-pg -e POSTGRES_PASSWORD=synthetic-local-only -e POSTGRES_DB=workbook_dev -p 127.0.0.1:5432:5432 -d postgres:17
+cp .env.example .env.local
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:3000/workbook. Create a synthetic case, enter base `50000` with GBP/annual/counterparty claim, then correct to `52000`. Reload or restart the dev server: both values and original evidence remain. To test another owner, stop the server, change DEMO_USER to bob and restart against the same database; Alice's cases are absent. Minimum base requires private/user constraint. Money is stored as decimal text, not float. Text/title/body and total-entry limits are enforced. All SQL input values are parameterized. Run from the repository root so the trusted migration file is available. The Docker command was not executed in this environment (Docker/Postgres binaries absent).
+
+`npm start` is for the static mock scaffold; workbook APIs deliberately refuse the production synthetic identity. Do not bypass that guard to host this build. The local DB URL must point to loopback; live credentials/remote databases are unsupported in this issue.
+
+Migrations are forward-only/checksummed, applied atomically and checked on startup. `workbook_app` is a NOLOGIN role selected inside every app transaction; it has no event UPDATE/DELETE grant. Append-only history and immutable originals have triggers. Case deletion may cascade history after the parent is gone, implementing the future privacy-delete exception rather than an unlimited immutable-history claim. This is not a complete backup/provider deletion policy. RLS is deferred; the query layer enforces owner filters and composite FKs enforce same-case links. Do not treat synthetic identity or shared migration credentials as production auth.
+
+Tests default to dev-only PGlite (embedded PostgreSQL) because this workspace has no local server. CI uses Node 22 and a PostgreSQL **17** service with the same SQL. Match that major to Supabase when a hosted project is selected. Local SQL checks cover migrations, owner-filtered service operations, constraints, rollback, corrections, conflicts and cascades. Exactly-one-winner concurrency and app-role permission gates run **only on server Postgres**; local skipped tests are not passes. The owner-isolation gate is met only after real server CI succeeds. CI also runs `npm run workbook:smoke`: HTTP create/correct, dev-server restart persistence, forged-owner handling and Bob's 404s. Use TEST_DATABASE_URL only for the dedicated local `workbook_test` database; the test runner never resets or drops an existing schema.
+
+PGlite is injected only by tests and is not in the application runtime. No uploads, extraction proposals, external advice/model processing, durable jobs, export or hosted deployment are added here.
