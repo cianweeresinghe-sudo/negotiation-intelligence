@@ -7,8 +7,11 @@ export const proposalMock:ExtractionAdapter={async extract(source){
  const privateMarkers=/\b(minimum|floor|lowest|bottom line|reserv\w*|walk[ -]away|fallback|accept|below|do not share|confidential|private)\b/i;
  const firstPerson=/\b(i|me|my|mine)\b/i;
  const counterpartyCue=/\b(offer|offering|recruiter|hiring manager|employer|we|our|base salary)\b/i;
+ // Hedge cues bind to an amount; 'asked about salary' is a known authority gap.
+ const hedges=/\b(to|between|from|up to|at least|around|about|approximately)\s+(?:(?:GBP|£)\s*)?\d/i;
+ const amountRange=/\d[\d,. ]*[kKmM]?\s*[-–—]\s*(?:(?:GBP|£)\s*)?\d/;
  const paragraphs=source.text.split(/\r?\n[ \t]*\r?\n/);
- const eligible=paragraphs.filter(paragraph=>counterpartyCue.test(paragraph)&&!firstPerson.test(paragraph)&&!privateMarkers.test(paragraph));
+ const eligible=paragraphs.filter(paragraph=>counterpartyCue.test(paragraph)&&!firstPerson.test(paragraph)&&!privateMarkers.test(paragraph)&&!hedges.test(paragraph)&&!amountRange.test(paragraph));
  const match=eligible.map(clause=>/(GBP|£)\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\s+(annually|annual|per year)/.exec(clause)).find(Boolean);
  return {source_id:source.id,base_revision:0,candidates:match?[{field:'base',value:match[2].replace(/,/g,''),currency:'GBP',period:'annual',epistemic_type:'counterparty_claim',confidence:'high',confidence_rationale:'Literal synthetic amount and period.',sensitivity:'private',evidence:[{source_id:source.id,quote:match[0]}]}]:[],unknowns:[],conflicts:[]};
 }};

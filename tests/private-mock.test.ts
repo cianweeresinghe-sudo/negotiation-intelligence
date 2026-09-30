@@ -29,3 +29,16 @@ test('reviewer probe table pins conservative losses and distinct supported offer
  ['Offer: GBP 52,000 annually.','52000'],['I cannot go below GBP 48,000 annually.',null],['I would not accept less than GBP 48,000 annually.',null],['I need GBP 48,000 annually to move.',null],['The lowest I will take is GBP 48,000 annually.',null],['Bottom line for me: GBP 48,000 annually.',null],['Reservation value GBP 48,000 annually.',null],['Confidential: GBP 48,000 annually is my limit.',null],['Offer for my role: GBP 52,000 annually.',null],['Minimum guaranteed base GBP 52,000 annually.',null],['Offer: GBP 52,000\nannually. My floor: GBP 48,000 annually.',null],['My minimum is:\nGBP 48,000 annually.',null],['Private notes\nminimum base\nGBP 48,000 annually',null],['The lowest I would accept is GBP 48,000 annually.',null],['Offer GBP 52,000 annually. I would walk away below GBP 48,000 annually.',null],['My employer offer is GBP 52,000 annually.',null],['Our base salary offer: GBP 52,000 annually.','52000']];
  for(const [text,expected] of cases){const s=source(text),rows=validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates;assert.deepEqual(rows.map(c=>c.value),expected?[expected]:[],text);}
 });
+test('known gap: a counterparty cue can still precede an unmarked private target',async()=>{
+ const s=source("Offer letter attached.\nTarget: GBP 48,000 annually (don't mention).");assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates.map(c=>c.value),['48000']);
+ // Pinned limitation, not acceptable real-model performance or a safety claim.
+});
+test('known gaps pin third-person target and current salary extraction',async()=>{
+ for(const [text,value] of [['Recruiter call notes. Target salary GBP 60,000 annually.','60000'],['Recruiter asked about salary. Current salary GBP 40,000 annually.','40000']]){const s=source(text);assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates.map(c=>c.value),[value]);}
+});
+test('mock declines range and hedge paragraphs rather than selecting a bound',async()=>{
+ for(const text of ['Offer: GBP 50,000 to GBP 55,000 annually.','Offer: GBP 50,000 - GBP 55,000 annually.','Offer: £50,000–£55,000 annually.',...['between','from','up to','at least','around','about','approximately'].map(word=>`Offer: ${word} GBP 52,000 annually.`)]){const s=source(text);assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates,[],text);}
+});
+test('unbound to and from wording remains a supported offer',async()=>{
+ for(const text of ['Offer to you: GBP 52,000 annually.','Offer from the employer: GBP 52,000 annually.']){const s=source(text);assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates.map(c=>c.value),['52000']);}
+});
