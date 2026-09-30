@@ -72,7 +72,7 @@ export async function runFixtures(cases=loadCases()){
 if(process.argv[1]&&import.meta.url===new URL(`file://${process.argv[1]}`).href){
  const report=await runFixtures();
  console.log('| case | validator replay | kept | mock extractor | detail |\n| --- | --- | --- | --- | --- |');
- for(const r of report.results)console.log(`| ${r.id} | ${r.status} | ${r.validator_replay.filter(x=>x.outcome==='kept'||x.outcome==='dropped_as_expected').length}/${r.validator_replay.length} | ${r.mock_extraction} | ${r.validator_replay.filter(x=>x.outcome!=='kept').map(x=>`${x.field}: ${x.outcome==='dropped_as_expected'?'expected drop ':''}${x.detail}`).join('; ')||'-'} |`);
+ for(const r of report.results)console.log(`| ${r.id} | ${r.status} | ${r.validator_replay.filter(x=>x.outcome==='kept'||x.outcome==='dropped_as_expected').length}/${r.validator_replay.length} | ${r.mock_extraction} | ${r.validator_replay.filter(x=>x.outcome!=='kept').map(x=>`${x.field}: ${x.outcome==='dropped_as_expected'?'expected drop ':''}${x.detail}`).join('; ')||'-'}${r.mock_extraction==='fail'?` (mock: ${r.mock_detail})`:''} |`);
  console.log(`\nValidator replay: ${report.tally.pass} pass, ${report.tally.fail} fail, ${report.tally.unsupported_field} unsupported_field of ${report.total}. Pass means the validator kept every expected candidate unchanged and dropped every expected drop for its stated reason. It is a pipeline check, not model quality.`);
  if(process.env.FIXTURE_JSON==='1')console.log(JSON.stringify(report,null,1));
 }
