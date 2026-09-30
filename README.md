@@ -103,3 +103,7 @@ The advisory escaping check uses server-rendered component markup, not a browser
 An accepted assertion links the proposal's first evidence row; additional quotes remain reachable through the retained proposal and its accepted-assertion link. The import handler executes the mock synchronously for this demo. A real adapter must execute in a background worker with the provider, consent, budget and abort gates satisfied.
 
 CI now runs a headless Chromium walkthrough against the real Postgres-backed dev server and uploads `m2c-browser-walkthrough` screenshots. It creates a synthetic case, imports text, checks the pending quote and stored advisory text, accepts, and checks the accepted view. This is a functional browser check; screenshot appearance should be inspected before claiming visual acceptance.
+
+### Fixture runner
+
+`npm run fixtures:run` replays `fixtures/CASES.json` through the extraction validator and the deterministic mock extractor and prints a per-case table with drop reason codes. Statuses are `pass`, `fail` and `unsupported_field`. "Validator replay" feeds each expected candidate back as model output, so it shows the fixture is acceptable to the validator, not that an extractor would find it. The mock column is the only extraction-accuracy signal, and the mock is a regex parser, not a model. Unknowns, conflict fields, forbidden draft values and state effects are not scored yet. `tests/fixtures.test.ts` pins the current per-case baseline, so any change in it is deliberate.
