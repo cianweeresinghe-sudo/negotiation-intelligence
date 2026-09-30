@@ -79,3 +79,9 @@ test('ISO timestamps match exactly rather than masquerading as numeric ranges',a
  const bad=await raw(d);rewrite(bad,'situation','The deadline is 2026-10-05T18:00:00.');blocked(bad,'unsupported_value',d);
  const options=await raw();rewrite(options,'situation','There are 1 or 2 options.');blocked(options,'unsupported_value');
 });
+test('period vocabulary rejects alternate monthly and unsupported time bases',async()=>{
+ for(const text of ['The base is £52,000 a month.','The base is £52,000 every month.','The base is £52,000 each week.','The base is weekly £52,000.','The base is £52,000 per hour.','The base is £52,000 p.m.','The base is £52,000 pcm.','The base is £52,000 daily.','The base is £52,000 fortnightly.','The base is £52,000 a day.']){const v=await raw();rewrite(v,'situation',text);blocked(v,'unsupported_value');}
+ for(const basis of ['', 'a year','per annum','p.a.','pa']){const v=await raw();rewrite(v,'situation',`The reviewed base is £52,000${basis?' '+basis:''}.`);validateAdviceOutput(v,snapshot);}
+ const monthly:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],period:'monthly'}]};for(const basis of ['a month','every month','pcm','p.m.']){const v=await raw(monthly);rewrite(v,'situation',`The base is £52,000 ${basis}.`);validateAdviceOutput(v,monthly);}
+ const once:AdviceSnapshot={...snapshot,assertions:[{...snapshot.assertions[0],period:'one_time'}]};for(const basis of ['one-time','once','single payment']){const v=await raw(once);rewrite(v,'situation',`The base is £52,000 ${basis}.`);validateAdviceOutput(v,once);}
+});
