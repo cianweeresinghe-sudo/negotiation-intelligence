@@ -1,0 +1,91 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "situation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recommended_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "intended_effect": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "main_risk": {
+      "type": "string",
+      "minLength": 1
+    },
+    "alternative": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_changing_question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "assertion_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "unresolved_proposal_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "draft": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "situation",
+    "recommended_action",
+    "intended_effect",
+    "rationale",
+    "main_risk",
+    "alternative",
+    "decision_changing_question",
+    "revision",
+    "evidence_ids",
+    "assertion_ids",
+    "unresolved_proposal_ids",
+    "assumptions",
+    "draft"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

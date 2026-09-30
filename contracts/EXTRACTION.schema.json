@@ -1,0 +1,109 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {},
+          "epistemic_type": {
+            "enum": [
+              "documented_observation",
+              "counterparty_claim",
+              "user_assumption",
+              "ai_inference"
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "confidence_rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "source_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "start": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "end": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "source_id",
+                "quote",
+                "start",
+                "end"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "field",
+          "value",
+          "epistemic_type",
+          "confidence",
+          "confidence_rationale",
+          "evidence"
+        ]
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "source_id",
+    "base_revision",
+    "candidates",
+    "unknowns",
+    "conflicts"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
