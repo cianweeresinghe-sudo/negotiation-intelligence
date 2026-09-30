@@ -54,7 +54,7 @@ export function validateAdviceOutput(raw:unknown,snapshot:AdviceSnapshot,privacy
   const supportedCurrencies=new Set([...claim.assertion_ids.map(id=>knownAssertions.get(id)!.currency),...claim.evidence_ids.map(id=>knownAssertions.get(knownEvidence.get(id)!.assertion_id)!.currency)]);
   if(currencies.some(c=>!supportedCurrencies.has(c??null)))fail('unsupported_value');
   const supportedPeriods=new Set([...cited].map(id=>knownAssertions.get(id)!.period));
-  const periodRules:[RegExp,string][]=[[/\b(annual|annually|per year|yearly|per annum)\b/i,'annual'],[/\b(monthly|per month)\b/i,'monthly'],[/\b(one[ -]time|once)\b/i,'one_time']];
+  const periodRules:[RegExp,string][]=[[/\b(?:year\w*|annual\w*|annum|pa)\b|\bp\.a\./i,'annual'],[/\bmonth\w*\b|\bpcm\b|\bp\.m\./i,'monthly'],[/\b(?:one[ -]time|once|single payment)\b/i,'one_time'],[/\b(?:week\w*|day\w*|hour\w*|fortnight\w*|daily)\b/i,'unsupported_period']];
   if(periodRules.some(([pattern,period])=>pattern.test(claim.text)&&!supportedPeriods.has(period)))fail('unsupported_value');
   for(const group of snapshot.conflicts){if(!group.assertionIds.some(id=>cited.has(id)))continue;
    if(group.assertionIds.some(id=>!cited.has(id)))fail('partial_conflict');
