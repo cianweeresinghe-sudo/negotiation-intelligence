@@ -25,7 +25,7 @@ before(async()=>{
 after(async()=>{await db.close();});
 async function fresh(owner:string=A){return w.create(owner,{title:`Synthetic ${randomUUID()}`});}
 async function fails404(p:Promise<unknown>){await assert.rejects(p,(e:unknown)=>e instanceof WorkbookError&&e.status===404);}
-test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,3);});
+test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,4);});
 test('all owner entry points reject foreign IDs identically',async()=>{
  const c=await fresh(),other=await fresh(B);const added=await w.add(A,c.id,entry);
  assert.ok(!(await w.list(B)).some(x=>x.id===c.id));
@@ -305,4 +305,64 @@ test('limit and deterministic validation failures are not automatically retried'
  const two:ExtractionAdapter={async extract(s){const raw=await proposalAdapter.extract(s,new AbortController().signal) as {candidates:Record<string,unknown>[]};return {...raw,candidates:[...raw.candidates,{...raw.candidates[0],field:'note',value:'£52,000 annually',currency:null,period:null}]};}};
  assert.equal(await runProposalJob(jobs,p,A,two,30000,c.id),false);assert.equal(await jobs.claim(A,c.id),undefined);
  assert.equal((await db.query<{error_code:string}>('SELECT error_code FROM ingestion_jobs WHERE case_id=$1',[c.id])).rows[0].error_code,'limit_reached');
+});
+
+async function reviewFixture(caseId?:string,adapter:ExtractionAdapter=proposalAdapter,limited?:Proposals){
+ const c=caseId?{id:caseId}:await fresh(),jobs=new IngestionJobs(app,`review-${randomUUID()}`),p=limited??new Proposals(app);
+ await jobs.importText(A,c.id,{text:'£52,000 annually'});const job=await jobs.claim(A,c.id);assert.ok(job);await p.extract(A,job,adapter,new AbortController().signal);
+ return {c,p,job,rows:(await p.list(A,c.id)).proposals.filter(p=>p.status==='pending')};
+}
+const twoReview:ExtractionAdapter={async extract(s){const raw=await proposalAdapter.extract(s,new AbortController().signal) as {candidates:Record<string,unknown>[]};return {...raw,candidates:[...raw.candidates,{...raw.candidates[0],field:'note',value:'£52,000 annually',currency:null,period:null}]};}};
+test('review accepts two source proposals sequentially and retains paste provenance',async()=>{
+ const {c,rows}=await reviewFixture(undefined,twoReview);const before=await w.read(A,c.id);
+ await w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'});await w.acceptProposal(A,c.id,rows[1].id,{expectedRevision:1,operation:'add'});
+ const after=await w.read(A,c.id);assert.equal(after.negotiation.revision,2);assert.equal(after.assertions.length,2);assert.equal(after.sources.length,before.sources.length);
+ for(const a of after.assertions){assert.equal(a.source_id,rows[0].source_id);assert.equal(a.epistemic_type,'counterparty_claim');assert.ok(a.evidence_id);}
+ const decisions=(await db.query<{decision:{edits:unknown}}>('SELECT decision FROM proposals WHERE case_id=$1',[c.id])).rows;assert.ok(decisions.every(d=>d.decision.edits===null));
+});
+test('review reject and decision replays preserve accepted revision assertions and history',async()=>{
+ const {c,rows}=await reviewFixture();const before=await w.read(A,c.id),history=await w.history(A,c.id);
+ await w.rejectProposal(A,c.id,rows[0].id,{expectedRevision:0});const after=await w.read(A,c.id);assert.equal(after.negotiation.revision,0);assert.deepEqual(after.assertions,before.assertions);assert.deepEqual(await w.history(A,c.id),history);assert.equal(after.negotiation.material_version,before.negotiation.material_version+1);
+ await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'}),(e:unknown)=>e instanceof WorkbookError&&e.status===409);
+ await assert.rejects(w.rejectProposal(A,c.id,rows[0].id,{expectedRevision:0}));assert.deepEqual(await w.read(A,c.id),after);
+});
+test('review edits cannot loosen privacy or invent an unsupported amount',async()=>{
+ const {c,rows}=await reviewFixture();const before=await w.read(A,c.id);
+ for(const edits of [{sensitivity:'shareable'},{value:'200000'}])await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add',edits},true),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+ assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual((await new Proposals(app).list(A,c.id)).proposals[0].candidate,rows[0].candidate);
+});
+test('review explicit epistemic edit is recorded with immutable candidate',async()=>{
+ const inferred:ExtractionAdapter={async extract(s){const raw=await proposalAdapter.extract(s,new AbortController().signal) as {candidates:Record<string,unknown>[]};return {...raw,candidates:raw.candidates.map(c=>({...c,epistemic_type:'ai_inference'}))};}};
+ const {c,rows}=await reviewFixture(undefined,inferred);await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'}));
+ await w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add',edits:{epistemicType:'documented_observation'}},true);
+ assert.equal((await w.read(A,c.id)).assertions[0].epistemic_type,'documented_observation');const stored=(await db.query<{candidate:{epistemic_type:string};decision:{edits:{epistemicType:string}}}>('SELECT candidate,decision FROM proposals WHERE id=$1',[rows[0].id])).rows[0];assert.equal(stored.candidate.epistemic_type,'ai_inference');assert.equal(stored.decision.edits.epistemicType,'documented_observation');assert.equal((await w.history(A,c.id)).at(-1)?.reason,'proposal_edited');
+});
+test('review stale concurrency preserves input and target acknowledgements are rechecked',async()=>{
+ const {c,rows}=await reviewFixture();const first=await w.add(A,c.id,entry);const raw={expectedRevision:0,operation:'correct',correctAssertionId:first.id,edits:{value:'52000'}};
+ await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,raw),(e:unknown)=>e instanceof WorkbookError&&e.code==='stale_revision');assert.equal(raw.edits.value,'52000');
+ await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{...raw,expectedRevision:1}),(e:unknown)=>e instanceof WorkbookError&&e.code==='re_review');
+ const second=await w.correct(A,c.id,first.id,{...entry,value:'51000',expectedRevision:1});
+ await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{...raw,expectedRevision:2,acknowledgeTargetChange:true,reviewedTargetIds:[first.id]}),(e:unknown)=>e instanceof WorkbookError&&e.code==='re_review');
+ await w.acceptProposal(A,c.id,rows[0].id,{...raw,expectedRevision:2,correctAssertionId:second.id,acknowledgeTargetChange:true,reviewedTargetIds:[second.id]});assert.equal((await w.read(A,c.id)).negotiation.revision,3);
+});
+test('review conflict requires explicit decision and never silently overwrites',async()=>{
+ const c=await fresh();await w.add(A,c.id,entry);const {rows}=await reviewFixture(c.id);await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:1,operation:'add'}));
+ await w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:1,operation:'conflict'});const state=await w.read(A,c.id);assert.equal(state.assertions.filter(a=>a.status==='active').length,2);assert.equal(state.conflicts.length,1);
+});
+test('review equal value defaults to duplicate dismissal and explicit source replacement preserves privacy',async()=>{
+ const c=await fresh();const original=await w.add(A,c.id,{...entry,value:'52000',epistemicType:'user_assumption'});const f=await reviewFixture(c.id);const before=await w.read(A,c.id);
+ await w.rejectProposal(A,c.id,f.rows[0].id,{expectedRevision:1,reason:'duplicate'});assert.deepEqual((await w.read(A,c.id)).assertions,before.assertions);assert.equal((await w.read(A,c.id)).negotiation.revision,1);
+ const next=await reviewFixture(c.id);await assert.rejects(w.acceptProposal(A,c.id,next.rows[0].id,{expectedRevision:1,operation:'confirm'}));
+ await w.acceptProposal(A,c.id,next.rows[0].id,{expectedRevision:1,operation:'confirm',acknowledgeProvenanceChange:true});const after=await w.read(A,c.id),active=after.assertions.filter(a=>a.status==='active');assert.equal(active.length,1);assert.equal(active[0].supersedes_id,original.id);assert.equal(active[0].sensitivity,'private');assert.equal(active[0].epistemic_type,'counterparty_claim');
+});
+test('review cross-job duplicates are flagged and decided proposals free capacity',async()=>{
+ const f=await reviewFixture();await reviewFixture(f.c.id);const list=(await f.p.list(A,f.c.id)).proposals;assert.ok(list.some(p=>p.duplicate_of===list[0].id));
+ const limited=new Proposals(app,1,1),one=await reviewFixture(undefined,proposalAdapter,limited);await w.rejectProposal(A,one.c.id,one.rows[0].id,{expectedRevision:0});const two=await reviewFixture(one.c.id,proposalAdapter,limited);assert.equal(two.rows.filter(p=>p.status==='pending').length,1);
+});
+test('review Bob cannot accept edit or reject and accepted replay creates no second assertion',async()=>{
+ const {c,rows}=await reviewFixture();const before=await w.read(A,c.id);await fails404(w.acceptProposal(B,c.id,rows[0].id,{expectedRevision:0,operation:'add'}));await fails404(w.acceptProposal(B,c.id,rows[0].id,{expectedRevision:0,operation:'add',edits:{value:'52000'}},true));await fails404(w.rejectProposal(B,c.id,rows[0].id,{expectedRevision:0}));assert.deepEqual(await w.read(A,c.id),before);
+ await w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'});await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:1,operation:'add'}));await assert.rejects(w.rejectProposal(A,c.id,rows[0].id,{expectedRevision:1}));assert.equal((await w.read(A,c.id)).assertions.length,1);
+});
+test('server Postgres two review writers on one proposal have exactly one winner',{skip:!server},async()=>{
+ const {c,rows}=await reviewFixture();const results=await Promise.allSettled([w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'}),w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'})]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);const loser=results.find(r=>r.status==='rejected') as PromiseRejectedResult;assert.equal(loser.reason.status,409);assert.equal((await w.read(A,c.id)).assertions.length,1);
 });

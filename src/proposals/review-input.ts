@@ -1,0 +1,5 @@
+import {z} from 'zod';
+import {revision} from '../workbook/input';
+export const editsInput=z.object({value:z.string().trim().min(1).max(2000).optional(),currency:z.string().regex(/^[A-Z]{3}$/).nullable().optional(),period:z.enum(['annual','monthly','one_time']).nullable().optional(),epistemicType:z.enum(['documented_observation','counterparty_claim','user_assumption','user_constraint']).optional(),sensitivity:z.enum(['private','shareable']).optional()}).strict().refine(v=>Object.keys(v).length>0,'An edit is required');
+export const acceptInput=z.object({expectedRevision:revision,operation:z.enum(['add','correct','conflict','confirm']),correctAssertionId:z.uuid().optional(),edits:editsInput.optional(),acknowledgeTargetChange:z.boolean().default(false),reviewedTargetIds:z.array(z.uuid()).max(100).optional(),acknowledgeProvenanceChange:z.boolean().default(false)}).strict();
+export const rejectInput=z.object({expectedRevision:revision,reason:z.enum(['reject','duplicate']).default('reject')}).strict();

@@ -8,9 +8,10 @@ export class Proposals {
  constructor(private db:Database,private maxProposals=200,private maxEvidence=1000){if(!Number.isInteger(maxProposals)||maxProposals<1||maxProposals>200||!Number.isInteger(maxEvidence)||maxEvidence<1||maxEvidence>1000)throw new Error('Invalid proposal limits');}
  async list(owner:string,caseId:string){
   if(!z.uuid().safeParse(caseId).success||!z.uuid().safeParse(owner).success||!(await this.db.query('SELECT id FROM cases WHERE id=$1 AND owner_id=$2',[caseId,owner])).rows.length)throw new WorkbookError(404,'Case not found');
-  const proposals=(await this.db.query('SELECT * FROM proposals WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at,candidate_index',[caseId,owner])).rows;
+  const proposals=(await this.db.query<{id:string;source_id:string;candidate:Record<string,unknown>;status:string;operation:string;target_assertion_ids:string[];base_revision:number}>('SELECT * FROM proposals WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at,candidate_index',[caseId,owner])).rows;
   const evidence=(await this.db.query('SELECT pe.proposal_id,e.* FROM proposal_evidence pe JOIN evidence e ON e.id=pe.evidence_id AND e.case_id=pe.case_id WHERE pe.case_id=$1 AND pe.owner_id=$2',[caseId,owner])).rows;
-  return {proposals,evidence};
+  const seen=new Map<string,string>();const flagged=proposals.map(p=>{const c=p.candidate,key=JSON.stringify([p.source_id,c.field,c.value,c.currency,c.period,c.epistemic_type]);const duplicate_of=p.status==='pending'?seen.get(key):undefined;if(p.status==='pending'&&!duplicate_of)seen.set(key,p.id);return {...p,duplicate_of:duplicate_of??null};});
+  return {proposals:flagged,evidence};
  }
  async extract(owner:string,job:ClaimedJob,adapter:ExtractionAdapter,signal:AbortSignal){
   // Snapshot provenance before extraction; target state is captured when pending
@@ -26,8 +27,8 @@ export class Proposals {
    if(signal.aborted)return false;
    const fence=await tx.query("UPDATE ingestion_jobs SET status='complete',lease_expires_at=NULL,updated_at=now() WHERE id=$1 AND case_id=$2 AND owner_id=$3 AND source_id=$4 AND attempt=$5 AND status='running' AND lease_expires_at>now() RETURNING id",[job.id,job.case_id,owner,job.source_id,job.attempt]);
    if(!fence.rows.length)return false;
-   const count=(await tx.query<{n:string}>('SELECT count(*)::text AS n FROM proposals WHERE case_id=$1 AND owner_id=$2',[job.case_id,owner])).rows[0];
-   const evidenceCount=(await tx.query<{n:string}>('SELECT count(*)::text AS n FROM evidence WHERE case_id=$1 AND owner_id=$2',[job.case_id,owner])).rows[0];
+   const count=(await tx.query<{n:string}>('SELECT count(*)::text AS n FROM proposals WHERE case_id=$1 AND owner_id=$2 AND status=\'pending\'',[job.case_id,owner])).rows[0];
+   const evidenceCount=(await tx.query<{n:string}>('SELECT count(*)::text AS n FROM evidence e WHERE e.case_id=$1 AND e.owner_id=$2 AND (EXISTS(SELECT 1 FROM assertions a WHERE a.evidence_id=e.id AND a.case_id=e.case_id) OR EXISTS(SELECT 1 FROM proposal_evidence pe JOIN proposals p ON p.id=pe.proposal_id AND p.case_id=pe.case_id WHERE pe.evidence_id=e.id AND pe.case_id=e.case_id AND p.status=\'pending\'))',[job.case_id,owner])).rows[0];
    if(Number(count.n)+validated.candidates.length>this.maxProposals||Number(evidenceCount.n)+validated.candidates.reduce((n,c)=>n+c.evidence.length,0)>this.maxEvidence)throw new WorkbookError(422,'Proposal limit reached');
    for(const c of validated.candidates){
     const active=(await tx.query<{id:string;value:unknown}>('SELECT id,value FROM assertions WHERE case_id=$1 AND owner_id=$2 AND field=$3 AND status=\'active\' ORDER BY id',[job.case_id,owner,c.field])).rows;

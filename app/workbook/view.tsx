@@ -1,5 +1,6 @@
 'use client';
 import { useEffect,useState } from 'react';
+import Review from './review';
 type Case={id:string;title:string;revision:number};
 type Assertion={id:string;field:string;value:string;status:string;source_id:string;supersedes_id:string|null;conflict_group_id:string|null};
 type Detail={negotiation:Case;assertions:Assertion[];sources:{id:string;original_text:string}[];conflicts:{id:string;status:string}[]};
@@ -21,10 +22,10 @@ export default function WorkbookView(){
  <label>Time basis <select name="period"><option value="annual">Annual</option><option value="monthly">Monthly</option><option value="one_time">One time</option><option value="">Not applicable</option></select></label>
  <label>Classification <select name="type"><option value="counterparty_claim">Counterparty claim</option><option value="user_constraint">User constraint</option><option value="documented_observation">Documented observation</option><option value="user_assumption">User assumption</option></select></label>
  <label><input type="checkbox" name="conflict"/> Record disagreement with existing value</label><button disabled={busy}>Save manual entry</button></form></section>
- <section><h2>Workbook and corrections</h2>{detail.assertions.map(a=><article key={a.id}><h3>{a.field}: {a.value}</h3><p>{a.status}{detail.conflicts.some(c=>c.id===a.conflict_group_id&&c.status==='open')?' · disputed':''}</p><p>{a.supersedes_id?'Correction of an earlier entry':'Original manual entry'}</p>
+ <Review key={detail.negotiation.id} caseId={detail.negotiation.id} revision={detail.negotiation.revision} assertions={detail.assertions} reload={()=>open(detail.negotiation.id)}/><section><h2>Workbook and corrections</h2>{detail.assertions.map(a=><article key={a.id}><h3>{a.field}: {a.value}</h3><p>{a.status}{detail.conflicts.some(c=>c.id===a.conflict_group_id&&c.status==='open')?' · disputed':''}</p><p>{a.supersedes_id?'Correction of an earlier entry':'Original manual entry'}</p>
  <details><summary>Original evidence</summary><pre>{detail.sources.find(s=>s.id===a.source_id)?.original_text}</pre></details>
  {a.status==='active'&&<form onSubmit={e=>{e.preventDefault();const value=new FormData(e.currentTarget).get('value');void act(async()=>{const current=detail.assertions.find(x=>x.id===a.id) as Assertion & {currency:string|null;period:string|null;epistemic_type:string;sensitivity:string};await api(`/api/cases/${detail.negotiation.id}/entries/${a.id}`,'PATCH',{field:a.field,value,currency:current.currency,period:current.period,epistemicType:current.epistemic_type,sensitivity:current.sensitivity,expectedRevision:detail.negotiation.revision});await open(detail.negotiation.id);});}}><label>Correct value <input name="value" required maxLength={2000}/></label><button disabled={busy}>Save correction</button></form>}
  {a.status==='active'&&a.conflict_group_id&&detail.conflicts.some(c=>c.id===a.conflict_group_id&&c.status==='open')&&<button disabled={busy} onClick={()=>void act(async()=>{await api(`/api/cases/${detail.negotiation.id}/conflicts/${a.conflict_group_id}`,'POST',{keepAssertionId:a.id,expectedRevision:detail.negotiation.revision});await open(detail.negotiation.id);})}>Resolve disagreement: keep this entry</button>}
  </article>)}</section></>}
- <footer>Inferred updates require a later proposal review flow. Managed login and live use are not enabled.</footer></main>;
+ <footer>Imported proposals require explicit review. Managed login and live use are not enabled.</footer></main>;
 }
