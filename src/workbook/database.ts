@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
@@ -17,18 +17,32 @@ export function postgresDatabase(url: string): Database {
     close: () => pool.end(),
   };
 }
-export async function migrate(db: Database) {
-  const sql = readFileSync(join(process.cwd(), 'migrations/001_workbook.sql'), 'utf8');
-  const checksum = createHash('sha256').update(sql).digest('hex');
+export async function migrate(db: Database, directory=join(process.cwd(), 'migrations')) {
+  const migrations=readdirSync(directory).filter(name=>name.endsWith('.sql')).map(name=>{
+    const match=/^(\d+)_[-a-zA-Z0-9_]+\.sql$/.exec(name);
+    if(!match)throw new Error('Invalid migration filename');
+    const version=Number(match[1]);
+    if(!Number.isSafeInteger(version)||version<1||version>2147483647)throw new Error('Invalid migration version');
+    const sql=readFileSync(join(directory,name),'utf8');
+    return {version,sql,checksum:createHash('sha256').update(sql).digest('hex')};
+  }).sort((a,b)=>a.version-b.version);
+  if(new Set(migrations.map(m=>m.version)).size!==migrations.length)throw new Error('Duplicate migration version');
   await db.transaction(async tx => {
     await tx.query('CREATE TABLE IF NOT EXISTS schema_migrations (version integer PRIMARY KEY, checksum text NOT NULL)');
-    // Serialize concurrent migration attempts on real Postgres.
     await tx.query('LOCK TABLE schema_migrations IN EXCLUSIVE MODE');
-    const existing = await tx.query<{ checksum: string }>('SELECT checksum FROM schema_migrations WHERE version=1');
-    if (existing.rows.length) { if (existing.rows[0].checksum !== checksum) throw new Error('Applied migration checksum changed'); return; }
-    // Migration text is a trusted repository file, never request data.
-    await tx.query(sql);
-    await tx.query('INSERT INTO schema_migrations(version, checksum) VALUES(1,$1)', [checksum]);
+    const applied=(await tx.query<{version:number;checksum:string}>('SELECT version,checksum FROM schema_migrations ORDER BY version')).rows;
+    for(const row of applied){
+      const file=migrations.find(m=>m.version===row.version);
+      if(!file||file.checksum!==row.checksum)throw new Error('Applied migration missing or checksum changed');
+    }
+    const last=applied.at(-1)?.version??0;
+    for(const migration of migrations){
+      if(applied.some(row=>row.version===migration.version))continue;
+      if(migration.version<last)throw new Error('Migration inserted before applied version');
+      // Migration text is a trusted repository file, never request data.
+      await tx.query(migration.sql);
+      await tx.query('INSERT INTO schema_migrations(version, checksum) VALUES($1,$2)',[migration.version,migration.checksum]);
+    }
   });
 }
 // Switch privilege context for every app operation, including standalone reads.
