@@ -1,3 +1,4 @@
+import {reviewBrowser} from './review-browser';
 import {Proposals,runProposalJob} from '../src/proposals/service';
 import {proposalMock} from '../src/proposals/mock';
 import {IngestionJobs} from '../src/ingestion/jobs';
@@ -70,5 +71,6 @@ try{
  const beforeReject=(await call(`/api/cases/${demoId}`)).data;
  assert.equal((await call(`/api/cases/${demoId}/proposals/${rejectedProposal.id}/reject`,'POST',{expectedRevision:1})).status,200);
  const afterReject=(await call(`/api/cases/${demoId}`)).data;assert.equal(afterReject.negotiation.revision,1);assert.deepEqual(afterReject.assertions,beforeReject.assertions);
+ if(process.env.REVIEW_BROWSER==='1')await reviewBrowser(origin,database!);
  console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation, idempotent text import and killed-worker recovery, pending proposals, Bob review mutation isolation, paste import, edited acceptance, replay protection and rejection.');
 }finally{await stop();}

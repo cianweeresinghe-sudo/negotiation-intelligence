@@ -99,3 +99,7 @@ When a field already exists, choose correction or disagreement explicitly. Equal
 Decided proposals no longer consume the pending-proposal allocation. Historical originals and evidence remain preserved. Source and job limits still apply (20 pasted sources, 60 jobs per case); a case eventually needs a new case when its job allocation is exhausted. This remains a local synthetic demo, with the live-release gates unchanged.
 
 The advisory escaping check uses server-rendered component markup, not a browser. Full visual acceptance must be reported separately. Server-Postgres CI includes the same-proposal writer race and real HTTP checks for import, edit, accept, reject, replay and foreign-owner mutations.
+
+An accepted assertion links the proposal's first evidence row; additional quotes remain reachable through the retained proposal and its accepted-assertion link. The import handler executes the mock synchronously for this demo. A real adapter must execute in a background worker with the provider, consent, budget and abort gates satisfied.
+
+CI now runs a headless Chromium walkthrough against the real Postgres-backed dev server and uploads `m2c-browser-walkthrough` screenshots. It creates a synthetic case, imports text, checks the pending quote and stored advisory text, accepts, and checks the accepted view. This is a functional browser check; screenshot appearance should be inspected before claiming visual acceptance.

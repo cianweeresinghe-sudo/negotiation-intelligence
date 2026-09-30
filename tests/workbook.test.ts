@@ -328,7 +328,7 @@ test('review reject and decision replays preserve accepted revision assertions a
 });
 test('review edits cannot loosen privacy or invent an unsupported amount',async()=>{
  const {c,rows}=await reviewFixture();const before=await w.read(A,c.id);
- for(const edits of [{sensitivity:'shareable'},{value:'200000'}])await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add',edits},true),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+ for(const edits of [{sensitivity:'shareable'},{value:'200000'},{currency:'EUR'},{period:'monthly'}])await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add',edits},true),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
  assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual((await new Proposals(app).list(A,c.id)).proposals[0].candidate,rows[0].candidate);
 });
 test('review explicit epistemic edit is recorded with immutable candidate',async()=>{
@@ -339,7 +339,8 @@ test('review explicit epistemic edit is recorded with immutable candidate',async
 });
 test('review stale concurrency preserves input and target acknowledgements are rechecked',async()=>{
  const {c,rows}=await reviewFixture();const first=await w.add(A,c.id,entry);const raw={expectedRevision:0,operation:'correct',correctAssertionId:first.id,edits:{value:'52000'}};
- await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,raw),(e:unknown)=>e instanceof WorkbookError&&e.code==='stale_revision');assert.equal(raw.edits.value,'52000');
+ const beforeStale=await w.read(A,c.id);
+ await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,raw),(e:unknown)=>e instanceof WorkbookError&&e.code==='stale_revision');assert.deepEqual(await w.read(A,c.id),beforeStale);
  await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{...raw,expectedRevision:1}),(e:unknown)=>e instanceof WorkbookError&&e.code==='re_review');
  const second=await w.correct(A,c.id,first.id,{...entry,value:'51000',expectedRevision:1});
  await assert.rejects(w.acceptProposal(A,c.id,rows[0].id,{...raw,expectedRevision:2,acknowledgeTargetChange:true,reviewedTargetIds:[first.id]}),(e:unknown)=>e instanceof WorkbookError&&e.code==='re_review');
@@ -351,7 +352,7 @@ test('review conflict requires explicit decision and never silently overwrites',
 });
 test('review equal value defaults to duplicate dismissal and explicit source replacement preserves privacy',async()=>{
  const c=await fresh();const original=await w.add(A,c.id,{...entry,value:'52000',epistemicType:'user_assumption'});const f=await reviewFixture(c.id);const before=await w.read(A,c.id);
- await w.rejectProposal(A,c.id,f.rows[0].id,{expectedRevision:1,reason:'duplicate'});assert.deepEqual((await w.read(A,c.id)).assertions,before.assertions);assert.equal((await w.read(A,c.id)).negotiation.revision,1);
+ await w.rejectProposal(A,c.id,f.rows[0].id,{expectedRevision:1,reason:'duplicate'});assert.deepEqual((await w.read(A,c.id)).assertions,before.assertions);assert.equal((await w.read(A,c.id)).negotiation.revision,1);assert.equal((await db.query<{decision:{operation:string}}>('SELECT decision FROM proposals WHERE id=$1',[f.rows[0].id])).rows[0].decision.operation,'duplicate');
  const next=await reviewFixture(c.id);await assert.rejects(w.acceptProposal(A,c.id,next.rows[0].id,{expectedRevision:1,operation:'confirm'}));
  await w.acceptProposal(A,c.id,next.rows[0].id,{expectedRevision:1,operation:'confirm',acknowledgeProvenanceChange:true});const after=await w.read(A,c.id),active=after.assertions.filter(a=>a.status==='active');assert.equal(active.length,1);assert.equal(active[0].supersedes_id,original.id);assert.equal(active[0].sensitivity,'private');assert.equal(active[0].epistemic_type,'counterparty_claim');
 });
@@ -365,4 +366,10 @@ test('review Bob cannot accept edit or reject and accepted replay creates no sec
 });
 test('server Postgres two review writers on one proposal have exactly one winner',{skip:!server},async()=>{
  const {c,rows}=await reviewFixture();const results=await Promise.allSettled([w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'}),w.acceptProposal(A,c.id,rows[0].id,{expectedRevision:0,operation:'add'})]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);const loser=results.find(r=>r.status==='rejected') as PromiseRejectedResult;assert.equal(loser.reason.status,409);assert.equal((await w.read(A,c.id)).assertions.length,1);
+});
+test('review pending-at-limit job returns terminal limit_reached without partial publication',async()=>{
+ const limited=new Proposals(app,1,1),f=await reviewFixture(undefined,proposalAdapter,limited),jobs=new IngestionJobs(app,`review-limit-${randomUUID()}`);
+ await jobs.importText(A,f.c.id,{text:'£52,000 annually'});const before=await w.read(A,f.c.id);
+ assert.equal(await runProposalJob(jobs,limited,A,proposalAdapter,30000,f.c.id),false);
+ const job=(await jobs.list(A,f.c.id)).find(j=>j.extractor_version.startsWith('review-limit-')) as {status:string;error_code?:string}|undefined;assert.equal(job?.status,'failed');assert.equal(job?.error_code,'limit_reached');assert.deepEqual(await w.read(A,f.c.id),before);assert.equal((await limited.list(A,f.c.id)).proposals.length,1);
 });

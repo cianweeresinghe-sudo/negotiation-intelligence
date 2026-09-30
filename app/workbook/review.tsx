@@ -4,8 +4,10 @@ type Candidate={field:string;value:string;currency:string|null;period:string|nul
 type Proposal={id:string;candidate:Candidate;status:string;duplicate_of:string|null;target_assertion_ids:string[]};
 type Active={id:string;field:string;value:string;status:string;currency?:string|null;period?:string|null;epistemic_type?:string};
 export function Advisory({text}:{text:string}){return <pre>{text}</pre>;}
+type JobOutcomeRow={drop_counts?:Record<string,number>;advisory_unknowns?:string[];advisory_conflicts?:string[]};
+export function JobOutcome({job:j}:{job:JobOutcomeRow}){return <div><p>{j.drop_counts?.unsupported_field??0} terms not recognised</p>{Object.entries(j.drop_counts??{}).filter(([k])=>k!=='unsupported_field').map(([k,n])=><p key={k}>{k}: {n}</p>)}{[...(j.advisory_unknowns??[]),...(j.advisory_conflicts??[])].map((s,k)=><Advisory key={k} text={s}/>)}</div>;}
 export default function Review({caseId,revision,assertions,reload}:{caseId:string;revision:number;assertions:Active[];reload:()=>Promise<void>}){
- const [rows,setRows]=useState<Proposal[]>([]),[evidence,setEvidence]=useState<{proposal_id:string;quote:string}[]>([]),[jobs,setJobs]=useState<{drop_counts?:Record<string,number>;unknowns?:string[];conflicts?:string[]}[]>([]),[text,setText]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+ const [rows,setRows]=useState<Proposal[]>([]),[evidence,setEvidence]=useState<{proposal_id:string;quote:string}[]>([]),[jobs,setJobs]=useState<JobOutcomeRow[]>([]),[text,setText]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
  async function api(path:string,body?:unknown){const r=await fetch(`/api/cases/${caseId}/${path}`,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw new Error(d.error);return d;}
  async function load(){const p=await api('proposals');setRows(p.proposals);setEvidence(p.evidence);setJobs(await api('imports'));}
  useEffect(()=>{void load().catch(e=>setMessage(e.message));},[caseId]); // Drafts survive revision reloads.
@@ -13,7 +15,7 @@ export default function Review({caseId,revision,assertions,reload}:{caseId:strin
  return <section><h2>Import and review · deterministic mock</h2><p>Invented text only. Supported extraction is limited; this is a pipeline demo.</p>
  <form onSubmit={e=>{e.preventDefault();void act(async()=>{await api('proposals/import',{text});setText('');});}}><label>Paste original source<textarea value={text} onChange={e=>setText(e.target.value)} required maxLength={100000}/></label><button disabled={busy}>Import and extract</button></form>
  {message&&<p role="alert">{message}. Your review edits are retained; check the current workbook before retrying.</p>}
- {jobs.map((j,i)=><div key={i}><p>{j.drop_counts?.unsupported_field??0} terms not recognised</p>{Object.entries(j.drop_counts??{}).filter(([k])=>k!=='unsupported_field').map(([k,n])=><p key={k}>{k}: {n}</p>)}{[...(j.unknowns??[]),...(j.conflicts??[])].map((s,k)=><Advisory key={k} text={s}/>)}</div>)}
+ {jobs.map((j,i)=><JobOutcome key={i} job={j}/>)}
  {rows.map(p=><Card key={p.id} proposal={p} quotes={evidence.filter(e=>e.proposal_id===p.id).map(e=>e.quote)} active={assertions.filter(a=>a.status==='active'&&a.field===p.candidate.field)} revision={revision} busy={busy} submit={(action,body)=>act(async()=>{await api(`proposals/${p.id}/${action}`,body);})}/>)}
  </section>;
 }
