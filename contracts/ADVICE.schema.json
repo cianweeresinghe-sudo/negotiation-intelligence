@@ -34,22 +34,6 @@
       "type": "integer",
       "minimum": 0
     },
-    "evidence_ids": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "uniqueItems": true
-    },
-    "assertion_ids": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      },
-      "uniqueItems": true
-    },
     "unresolved_proposal_ids": {
       "type": "array",
       "items": {
@@ -70,6 +54,49 @@
         "string",
         "null"
       ]
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "assertion_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "output_path": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "text",
+          "evidence_ids",
+          "assertion_ids",
+          "output_path"
+        ]
+      }
+    },
+    "material_version": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "required": [
@@ -81,11 +108,11 @@
     "alternative",
     "decision_changing_question",
     "revision",
-    "evidence_ids",
-    "assertion_ids",
     "unresolved_proposal_ids",
     "assumptions",
-    "draft"
+    "draft",
+    "claims",
+    "material_version"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

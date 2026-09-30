@@ -26,7 +26,8 @@
               "documented_observation",
               "counterparty_claim",
               "user_assumption",
-              "ai_inference"
+              "ai_inference",
+              "user_constraint"
             ]
           },
           "confidence": {
@@ -53,24 +54,32 @@
                 "quote": {
                   "type": "string",
                   "minLength": 1
-                },
-                "start": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "end": {
-                  "type": "integer",
-                  "minimum": 1
                 }
               },
               "required": [
                 "source_id",
-                "quote",
-                "start",
-                "end"
+                "quote"
               ]
             },
             "minItems": 1
+          },
+          "sensitivity": {
+            "enum": [
+              "private",
+              "shareable"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -79,7 +88,10 @@
           "epistemic_type",
           "confidence",
           "confidence_rationale",
-          "evidence"
+          "evidence",
+          "sensitivity",
+          "currency",
+          "period"
         ]
       }
     },

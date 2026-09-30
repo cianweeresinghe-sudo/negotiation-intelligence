@@ -15,7 +15,7 @@
     },
     {
       "review": "User confirms revised base but deadline uncertain.",
-      "expect": "Revision 2; base superseded with provenance; deadlines unresolved."
+      "expect": "Revision 2; base superseded with provenance; accepted deadline claims share an open conflict_group_id; confirmed deadline unknown."
     },
     {
       "advice": "Ask recruiter to confirm deadline before choosing timing.",
@@ -23,7 +23,7 @@
     },
     {
       "correction": "Recruiter confirms 5 October deadline.",
-      "expect": "Review proposal, supersede 4 October; revision 3; advice changes timing rationale."
+      "expect": "Create a reviewed proposal; authority remains unknown. User explicitly decides whether to resolve the deadline conflict and supersede the 4 October claim. No automatic resolution; revision increments only on acceptance."
     }
   ]
 }
