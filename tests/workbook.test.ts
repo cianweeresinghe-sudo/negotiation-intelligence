@@ -465,3 +465,13 @@ test('pending proposal values and ids never become accepted snapshot facts or ev
  const {c,service}=await adviceCase();const {rows}=await reviewFixture(c.id);const s=await service.snapshot(A,c.id);assert.deepEqual(s.assertions.map(a=>a.value),['50000']);assert.equal(s.pendingProposalIds.includes(rows[0].id),true);assert.equal(s.evidence.some(e=>e.id===rows[0].id),false);
  const state=(await w.read(A,c.id)).negotiation;await assert.rejects(service.generate(A,c.id,{expectedRevision:state.revision,expectedMaterialVersion:state.material_version},{version:'pending-id',async generate(s,signal){const raw=await adviceMock.generate(s,signal) as any;raw.claims[0].evidence_ids=[rows[0].id];return raw;}}),(e:unknown)=>e instanceof WorkbookError&&e.code==='invalid_reference');assert.equal((await service.history(A,c.id)).length,0);
 });
+test('hostile advice adapters cannot publish fabricated cross-case source or unsupported-number claims',async()=>{
+ const {c,service,input}=await adviceCase();const other=await adviceCase();const foreign=(await w.read(A,other.c.id)).assertions[0];const local=(await w.read(A,c.id)).assertions[0];
+ for(const [index,ref] of [randomUUID(),String(foreign.id),String(local.source_id)].entries()){
+  await assert.rejects(service.generate(A,c.id,input,{version:`hostile-ref-${index}`,async generate(s,signal){const raw=await adviceMock.generate(s,signal) as any;raw.claims[0].evidence_ids=[ref];return raw;}}),(e:unknown)=>e instanceof WorkbookError&&e.code==='invalid_reference');assert.equal((await service.history(A,c.id)).length,0);
+ }
+ await assert.rejects(service.generate(A,c.id,input,{version:'hostile-number',async generate(s,signal){const raw=await adviceMock.generate(s,signal) as any;raw.situation='The base is £52,000.';raw.claims[0].text=raw.situation;return raw;}}),(e:unknown)=>e instanceof WorkbookError&&e.code==='unsupported_value');assert.equal((await service.history(A,c.id)).length,0);
+});
+test('advice history returns hashes and content without every stored snapshot body',async()=>{
+ const {c,service,input}=await adviceCase();const record=await service.generate(A,c.id,input,adviceMock);const history=await service.history(A,c.id);assert.equal('snapshot' in history[0],false);assert.equal((history[0] as any).snapshot_hash,snapshotHash(record.snapshot));assert.ok((await service.read(A,c.id,record.id)).snapshot);
+});
