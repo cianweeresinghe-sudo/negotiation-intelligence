@@ -1,5 +1,5 @@
 ALTER TABLE ingestion_jobs DROP CONSTRAINT ingestion_jobs_error_code_check;
-ALTER TABLE ingestion_jobs ADD CHECK(error_code IN ('processing_failed','timeout','attempts_exhausted','invalid_response','wrong_source'));
+ALTER TABLE ingestion_jobs ADD CHECK(error_code IN ('processing_failed','timeout','attempts_exhausted','invalid_response','wrong_source','limit_reached'));
 ALTER TABLE ingestion_jobs ADD COLUMN proposal_count integer NOT NULL DEFAULT 0 CHECK(proposal_count BETWEEN 0 AND 30);
 ALTER TABLE ingestion_jobs ADD COLUMN drop_counts jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE ingestion_jobs ADD COLUMN advisory_unknowns jsonb NOT NULL DEFAULT '[]';
@@ -28,3 +28,11 @@ CREATE TABLE proposal_evidence (
 );
 GRANT SELECT,INSERT ON proposals,proposal_evidence TO workbook_app;
 GRANT UPDATE(status,decision,accepted_assertion_id) ON proposals TO workbook_app;
+
+ALTER TABLE proposals ADD CHECK((status='accepted')=(accepted_assertion_id IS NOT NULL));
+CREATE FUNCTION protect_proposal_decision() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.status<>'pending' THEN RAISE EXCEPTION 'proposal decision is final'; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER immutable_proposal_decision BEFORE UPDATE ON proposals FOR EACH ROW EXECUTE FUNCTION protect_proposal_decision();

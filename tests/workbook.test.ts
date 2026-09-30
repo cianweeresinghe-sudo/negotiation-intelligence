@@ -246,8 +246,9 @@ test('timed-out and superseded extraction outputs cannot publish proposals',asyn
  const c=await fresh(),jobs=new IngestionJobs(app,'test-late'),proposals=new Proposals(app);await jobs.importText(A,c.id,{text:'£52,000 annually'});
  let deliver!:()=>void;let reached!:()=>void;const started=new Promise<void>(r=>{reached=r;});
  const late:ExtractionAdapter={async extract(s){reached();await new Promise<void>(r=>{deliver=r;});return proposalAdapter.extract(s,new AbortController().signal);}};
- const running=runProposalJob(jobs,proposals,A,late,5,c.id);await started;await running;
- const reclaimed=await jobs.claim(A,c.id);assert.ok(reclaimed);deliver();await new Promise(r=>setTimeout(r,5));assert.equal((await proposals.list(A,c.id)).proposals.length,0);
+ let latePublish!:Promise<boolean>;const tracked:Proposals=Object.create(proposals);tracked.extract=(...args:Parameters<Proposals['extract']>)=>{latePublish=proposals.extract(...args);return latePublish;};
+ const running=runProposalJob(jobs,tracked,A,late,5,c.id);await started;await running;
+ const reclaimed=await jobs.claim(A,c.id);assert.ok(reclaimed);deliver();assert.equal(await latePublish,false);assert.equal((await proposals.list(A,c.id)).proposals.length,0);
  await proposals.extract(A,reclaimed,proposalAdapter,new AbortController().signal);assert.equal((await proposals.list(A,c.id)).proposals.length,1);
 });
 test('deleted case rejects late proposal completion and cascades proposal evidence',async()=>{
@@ -257,7 +258,7 @@ test('deleted case rejects late proposal completion and cascades proposal eviden
 });
 test('proposal caps roll back completion and permit retry after original remains saved',async()=>{
  const c=await fresh(),jobs=new IngestionJobs(app,'test-proposal-caps'),limited=new Proposals(app,1,1);await jobs.importText(A,c.id,{text:'£52,000 annually'});const job=await jobs.claim(A,c.id);assert.ok(job);
- const two:ExtractionAdapter={async extract(s){const raw=await proposalAdapter.extract(s,new AbortController().signal) as {candidates:unknown[]};return {...raw,candidates:[...raw.candidates,...raw.candidates]};}};
+ const two:ExtractionAdapter={async extract(s){const raw=await proposalAdapter.extract(s,new AbortController().signal) as {candidates:unknown[]};return {...raw,candidates:[...raw.candidates,{...raw.candidates[0] as Record<string,unknown>,field:'note',value:'£52,000 annually',currency:null,period:null}]};}};
  await assert.rejects(limited.extract(A,job,two,new AbortController().signal));assert.equal((await limited.list(A,c.id)).proposals.length,0);assert.equal((await jobs.list(A,c.id))[0].status,'running');assert.equal((await w.read(A,c.id)).negotiation.material_version,0);
  assert.equal(await limited.extract(A,job,proposalAdapter,new AbortController().signal),true);assert.equal(await limited.extract(A,job,proposalAdapter,new AbortController().signal),false);
 });
@@ -277,4 +278,31 @@ test('wrong-source batch fails safely with no partial proposal or evidence write
  const before=await w.read(A,c.id);const wrong:ExtractionAdapter={async extract(s){return {...await proposalAdapter.extract(s,new AbortController().signal) as Record<string,unknown>,source_id:randomUUID()};}};
  assert.equal(await runProposalJob(jobs,p,A,wrong,30000,c.id),false);assert.deepEqual(await w.read(A,c.id),before);assert.equal((await p.list(A,c.id)).proposals.length,0);
  assert.equal((await db.query<{error_code:string}>('SELECT error_code FROM ingestion_jobs WHERE case_id=$1 AND owner_id=$2',[c.id,A])).rows[0].error_code,'wrong_source');
+});
+
+test('DB attempt fence rejects superseded worker with a fresh non-aborted signal',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-direct-fence'),p=new Proposals(app);await jobs.importText(A,c.id,{text:'£52,000 annually'});const first=await jobs.claim(A,c.id);assert.ok(first);
+ await db.query("UPDATE ingestion_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",[first.id]);const second=await jobs.claim(A,c.id);assert.ok(second);
+ assert.equal(await p.extract(A,first,proposalAdapter,new AbortController().signal),false);assert.equal((await p.list(A,c.id)).proposals.length,0);assert.equal((await w.read(A,c.id)).negotiation.material_version,0);
+ assert.equal(await p.extract(A,second,proposalAdapter,new AbortController().signal),true);
+});
+test('proposal target set and base revision are persisted for explicit later review',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-targets'),p=new Proposals(app);const original=await w.add(A,c.id,entry);await jobs.importText(A,c.id,{text:'£52,000 annually'});const job=await jobs.claim(A,c.id);assert.ok(job);await p.extract(A,job,proposalAdapter,new AbortController().signal);
+ const conflict=(await p.list(A,c.id)).proposals[0] as {operation:string;target_assertion_ids:string[];base_revision:number};assert.equal(conflict.operation,'conflict');assert.deepEqual(conflict.target_assertion_ids,[original.id]);assert.equal(conflict.base_revision,1);
+ const blank=await fresh();await jobs.importText(A,blank.id,{text:'£52,000 annually'});const empty=await jobs.claim(A,blank.id);assert.ok(empty);await p.extract(A,empty,proposalAdapter,new AbortController().signal);const added=(await p.list(A,blank.id)).proposals[0] as typeof conflict;assert.equal(added.operation,'add');assert.deepEqual(added.target_assertion_ids,[]);assert.equal(added.base_revision,0);
+ const same=await fresh();const active=await w.add(A,same.id,{...entry,value:'52000'});await jobs.importText(A,same.id,{text:'£52,000 annually'});const equal=await jobs.claim(A,same.id);assert.ok(equal);await p.extract(A,equal,proposalAdapter,new AbortController().signal);const confirming=(await p.list(A,same.id)).proposals[0] as typeof conflict;assert.equal(confirming.operation,'add');assert.deepEqual(confirming.target_assertion_ids,[active.id]);
+});
+
+test('proposal review status requires accepted link and decisions cannot be replayed',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-decision-integrity'),p=new Proposals(app);await jobs.importText(A,c.id,{text:'£52,000 annually'});const job=await jobs.claim(A,c.id);assert.ok(job);await p.extract(A,job,proposalAdapter,new AbortController().signal);
+ const id=(await db.query<{id:string}>('SELECT id FROM proposals WHERE case_id=$1',[c.id])).rows[0].id;
+ await assert.rejects(app.query("UPDATE proposals SET status='accepted' WHERE id=$1",[id]));
+ await app.query("UPDATE proposals SET status='rejected',decision='{}'::jsonb WHERE id=$1",[id]);
+ await assert.rejects(app.query("UPDATE proposals SET status='pending' WHERE id=$1",[id]),/proposal decision is final/);
+});
+test('limit and deterministic validation failures are not automatically retried',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-terminal'),p=new Proposals(app,1,1);await jobs.importText(A,c.id,{text:'£52,000 annually'});
+ const two:ExtractionAdapter={async extract(s){const raw=await proposalAdapter.extract(s,new AbortController().signal) as {candidates:Record<string,unknown>[]};return {...raw,candidates:[...raw.candidates,{...raw.candidates[0],field:'note',value:'£52,000 annually',currency:null,period:null}]};}};
+ assert.equal(await runProposalJob(jobs,p,A,two,30000,c.id),false);assert.equal(await jobs.claim(A,c.id),undefined);
+ assert.equal((await db.query<{error_code:string}>('SELECT error_code FROM ingestion_jobs WHERE case_id=$1',[c.id])).rows[0].error_code,'limit_reached');
 });

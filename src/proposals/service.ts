@@ -47,6 +47,6 @@ export async function runProposalJob(jobs:import('../ingestion/jobs').IngestionJ
  jobs.validateTimeout(timeoutMs);const job=await jobs.claim(owner,caseId);if(!job)return false;
  const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
  try{return await Promise.race([proposals.extract(owner,job,adapter,controller.signal),new Promise<never>((_,reject)=>{timer=setTimeout(()=>{reject(new Error('timeout'));controller.abort();},timeoutMs);})]);}
- catch(error){await jobs.finish(owner,job,controller.signal.aborted?'timeout':error instanceof ExtractionError?error.code:'processing_failed');return false;}
+ catch(error){await jobs.finish(owner,job,controller.signal.aborted?'timeout':error instanceof ExtractionError?error.code:error instanceof WorkbookError&&error.status===422?'limit_reached':'processing_failed');return false;}
  finally{clearTimeout(timer);}
 }
