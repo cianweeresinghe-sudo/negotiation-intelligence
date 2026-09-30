@@ -27,5 +27,6 @@ try{
  await stop();await start('bob');
  for(const [path,method,body] of [[`/api/cases/${id}`,'GET',undefined],[`/api/cases/${id}`,'PATCH',{title:'stolen',expectedRevision:2}],[`/api/cases/${id}`,'DELETE',{expectedRevision:2}],[`/api/cases/${id}/entries`,'POST',{...manual,expectedRevision:2}],[`/api/cases/${id}/entries/${corrected.data.id}`,'PATCH',{...manual,expectedRevision:2}],[`/api/cases/${id}/history`,'GET',undefined]] as const){assert.equal((await call(path,method,body)).status,404);}
  assert.equal((await call('/api/cases/'+crypto.randomUUID())).status,404);
+ await stop();await start('alice');const afterDenied=await call(`/api/cases/${id}`);assert.equal(afterDenied.status,200);assert.deepEqual(afterDenied.data,reload.data);
  console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation.');
 }finally{await stop();}

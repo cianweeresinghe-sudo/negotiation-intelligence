@@ -1,5 +1,8 @@
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync,writeFileSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { postgresDatabase, migrate, appDatabase, type Database } from '../src/workbook/database';
@@ -116,4 +119,44 @@ test('correction in a conflict preserves a single authoritative membership chain
  const next=await w.correct(A,c.id,first.id,{...entry,value:'52000',expectedRevision:2});
  const result=await w.read(A,c.id);const group=String(result.conflicts[0].id);
  assert.ok(result.assertions.every(a=>a.conflict_group_id===group));assert.equal(result.assertions.find(a=>a.id===next.id)?.supersedes_id,first.id);
+});
+
+ test('invalid, stale and repeated conflict resolution leave state and history unchanged',async()=>{
+ const c=await fresh();const first=await w.add(A,c.id,entry);await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});
+ const before=await w.read(A,c.id), history=await w.history(A,c.id),group=String(before.conflicts[0].id);
+ await assert.rejects(w.resolve(A,c.id,group,{expectedRevision:1,keepAssertionId:first.id}),(e:unknown)=>e instanceof WorkbookError&&e.status===409);
+ await fails404(w.resolve(A,c.id,group,{expectedRevision:2,keepAssertionId:randomUUID()}));
+ assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual(await w.history(A,c.id),history);
+ await w.resolve(A,c.id,group,{expectedRevision:2,keepAssertionId:first.id});
+ const resolved=await w.read(A,c.id),resolvedHistory=await w.history(A,c.id);
+ await fails404(w.resolve(A,c.id,group,{expectedRevision:3,keepAssertionId:first.id}));
+ assert.deepEqual(await w.read(A,c.id),resolved);assert.deepEqual(await w.history(A,c.id),resolvedHistory);
+});
+test('stale deletion preserves case, originals and history',async()=>{
+ const c=await fresh();await w.add(A,c.id,entry);const before=await w.read(A,c.id),history=await w.history(A,c.id);
+ await assert.rejects(w.remove(A,c.id,0),(e:unknown)=>e instanceof WorkbookError&&e.status===409);
+ assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual(await w.history(A,c.id),history);
+});
+test('request boundary rejects missing Origin and non-JSON content',async()=>{
+ assert.throws(()=>guardRequest(new Request('http://127.0.0.1/api/cases',{method:'POST'})),(e:unknown)=>e instanceof WorkbookError&&e.status===403);
+ await assert.rejects(parseBody(new Request('http://127.0.0.1/api/cases',{method:'POST',headers:{'content-type':'text/plain'},body:'{}'})),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+});
+
+test('migration discovery orders numeric versions, preserves checksums and rolls back failures',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'migration-test-'));const pg=new PGlite();
+ const isolated:Database={query:async <T>(sql:string,values?:unknown[])=>({rows:(await pg.query(sql,values)).rows as T[]}),transaction:run=>pg.transaction(tx=>run({query:async <T>(sql:string,values?:unknown[])=>({rows:(await tx.query(sql,values)).rows as T[]})})),close:()=>pg.close()};
+ try{
+ writeFileSync(join(dir,'10_later.sql'),'ALTER TABLE migration_fixture ADD COLUMN next_value integer');
+ writeFileSync(join(dir,'2_first.sql'),'CREATE TABLE migration_fixture(id integer)');
+ await migrate(isolated,dir);await migrate(isolated,dir);
+ assert.deepEqual((await isolated.query<{version:number}>('SELECT version FROM schema_migrations ORDER BY version')).rows.map(r=>r.version),[2,10]);
+ writeFileSync(join(dir,'11_bad.sql'),'ALTER TABLE nonexistent_table ADD COLUMN bad integer');
+ await assert.rejects(migrate(isolated,dir));assert.equal((await isolated.query('SELECT * FROM schema_migrations')).rows.length,2);
+ rmSync(join(dir,'11_bad.sql'));writeFileSync(join(dir,'2_first.sql'),'CREATE TABLE changed(id integer)');
+ await assert.rejects(migrate(isolated,dir),/checksum changed/);
+ writeFileSync(join(dir,'2_first.sql'),'CREATE TABLE migration_fixture(id integer)');
+ writeFileSync(join(dir,'02_duplicate.sql'),'SELECT 1');await assert.rejects(migrate(isolated,dir),/Duplicate migration/);
+ rmSync(join(dir,'02_duplicate.sql'));writeFileSync(join(dir,'1_backfill.sql'),'SELECT 1');await assert.rejects(migrate(isolated,dir),/before applied/);
+ rmSync(join(dir,'1_backfill.sql'));rmSync(join(dir,'10_later.sql'));await assert.rejects(migrate(isolated,dir),/missing/);
+ }finally{await isolated.close();rmSync(dir,{recursive:true,force:true});}
 });

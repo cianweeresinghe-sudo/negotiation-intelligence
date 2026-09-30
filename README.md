@@ -55,3 +55,11 @@ Migrations are forward-only/checksummed, applied atomically and checked on start
 Tests default to dev-only PGlite (embedded PostgreSQL) because this workspace has no local server. CI uses Node 22 and a PostgreSQL **17** service with the same SQL. Match that major to Supabase when a hosted project is selected. Local SQL checks cover migrations, owner-filtered service operations, constraints, rollback, corrections, conflicts and cascades. Exactly-one-winner concurrency and app-role permission gates run **only on server Postgres**; local skipped tests are not passes. The owner-isolation gate is met only after real server CI succeeds. CI also runs `npm run workbook:smoke`: HTTP create/correct, dev-server restart persistence, forged-owner handling and Bob's 404s. Use TEST_DATABASE_URL only for the dedicated local `workbook_test` database; the test runner never resets or drops an existing schema.
 
 PGlite is injected only by tests and is not in the application runtime. No uploads, extraction proposals, external advice/model processing, durable jobs, export or hosted deployment are added here.
+
+### Forward migrations
+
+The runner discovers numeric `migrations/<version>_<name>.sql` files in version order, checks every applied checksum, and applies pending migrations transactionally under the migration lock. Applied files must remain present and unchanged. Add a higher version; never insert a migration before an applied version. Duplicate versions or malformed filenames fail closed. Runtime-first-request migration remains a local demo shortcut; hosted migrations must run out of band.
+
+### Text-first demo sequence
+
+The remaining M1 file storage and real-model budget controls are deferred for the Monday synthetic demo, following CTO plan review. Next slices are pasted-text sources/persisted jobs, evidence-validated proposals, then atomic review/UI. PDFs/uploads remain unsupported until their parsing/storage acceptance gates ship. This does not complete the original live-alpha M1 scope.
