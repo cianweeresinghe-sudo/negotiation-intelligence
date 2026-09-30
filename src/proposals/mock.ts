@@ -23,6 +23,7 @@ export const proposalMock:ExtractionAdapter={async extract(source){
   if(/\b\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(?:to|or|[-–—])\s+\d/i.test(paragraph))continue;
   for(const date of paragraph.matchAll(datePattern)){
    if(candidates.length>=30)break;
+   if(/^confirms?/i.test(date[0])&&!/^\s+deadline\b/i.test(paragraph.slice(date.index!+date[0].length)))continue;
    candidates.push({field:'deadline',value:date[1],currency:null,period:null,epistemic_type:'counterparty_claim',confidence:'high',confidence_rationale:'Literal synthetic deadline.',sensitivity:'private',evidence:[{source_id:source.id,quote:date[0]}]});
   }
  }

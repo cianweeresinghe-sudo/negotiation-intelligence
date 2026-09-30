@@ -117,3 +117,5 @@ The mock also declines range/hedge paragraphs rather than selecting a bound. It 
 The mock declines paragraphs longer than 4,000 characters before amount matching. ISO and named calendar dates are masked for range/hedge detection, so a supported offer can include a dated deadline. It still extracts only base in the synthetic format; enter other fields manually.
 
 The second-interaction demo parser accepts `Recruiter: Offer GBP 50,000 annually; deadline 5 October.` It extracts the literal date without guessing a year. Use an offer or recruiter cue; private, first-person, hedged and range paragraphs are declined. A dated deadline may also be put in a separate paragraph with its own recruiter cue. Always check the evidence before accepting.
+
+A confirmation must name the deadline explicitly, for example `Recruiter confirms 5 October deadline.` Confirmed interview or start dates are not treated as deadlines. Where a deadline label is followed by multiple dates, this demo parser takes the first literal date; check the quote before accepting.
