@@ -63,3 +63,15 @@ The runner discovers numeric `migrations/<version>_<name>.sql` files in version 
 ### Text-first demo sequence
 
 The remaining M1 file storage and real-model budget controls are deferred for the Monday synthetic demo, following CTO plan review. Next slices are pasted-text sources/persisted jobs, evidence-validated proposals, then atomic review/UI. PDFs/uploads remain unsupported until their parsing/storage acceptance gates ship. This does not complete the original live-alpha M1 scope.
+
+### M2a pasted-text jobs
+
+`POST /api/cases/<id>/imports` accepts `{ "text": "synthetic offer text" }` only; `GET` returns owner-scoped persisted job status. Uploaded files/PDF are unsupported. Originals default private and deduplicate by exact UTF-8 SHA-256 within a case. A job key also includes extractor version. Imports do not change accepted state or revision.
+
+Run `npm run worker:ingestion` with the same local DB and synthetic identity environment as the app. Each invocation claims one persisted job; call again to drain pending jobs. This foundation worker only marks text ready, with no extraction, proposals or model invocation. Complete is a text-foundation status, not extracted/reviewed state. M2b will add validated proposals inside the fenced completion transaction.
+
+Optional environment caps: `INGESTION_TEXT_LIMIT` (default 100000 Unicode code points, maximum 100000), `INGESTION_MAX_ATTEMPTS` (3, maximum 10), `INGESTION_LEASE_MS` (60000, maximum 300000), `INGESTION_TIMEOUT_MS` (30000, maximum 120000). Set the lease above the processing timeout. Invalid settings fail closed. Sources and jobs survive worker failures; failed/expired work retries up to the attempt cap. Late attempts and jobs belonging to deleted cases cannot complete. CI kills a claimed worker, expires its lease in the synthetic test DB, restarts processing and verifies one source/job and no accepted-state changes. This checks crash recovery without a minute-long lease wait.
+
+`INGESTION_CASE_ID` optionally scopes a worker invocation to a case while retaining the trusted owner filter. Timeout must be strictly below lease; the worker validates this before claiming. Whitespace-only input is rejected without trimming stored originals.
+
+Pasted sources are capped per case at 20 and 2 MiB total UTF-8 bytes (`INGESTION_SOURCE_LIMIT`, `INGESTION_BYTE_LIMIT`); job versions are capped at 60 per case. Duplicate access remains available at the cap. NUL is rejected with 422. The import JSON transport cap is 1.3 MB to admit 100000 astral characters even as escaped surrogate pairs. Per-owner aggregate storage and active-worker caps remain live-alpha gates.

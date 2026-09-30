@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { postgresDatabase, migrate, appDatabase, type Database } from '../src/workbook/database';
+import {IngestionJobs,runOne} from '../src/ingestion/jobs';
 import { Workbook,WorkbookError } from '../src/workbook/service';
 import { requireCurrentOwner,DEMO_OWNERS } from '../src/workbook/identity';
 import { guardRequest,parseBody } from '../src/workbook/runtime';
@@ -22,7 +23,7 @@ before(async()=>{
 after(async()=>{await db.close();});
 async function fresh(owner:string=A){return w.create(owner,{title:`Synthetic ${randomUUID()}`});}
 async function fails404(p:Promise<unknown>){await assert.rejects(p,(e:unknown)=>e instanceof WorkbookError&&e.status===404);}
-test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,1);});
+test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,2);});
 test('all owner entry points reject foreign IDs identically',async()=>{
  const c=await fresh(),other=await fresh(B);const added=await w.add(A,c.id,entry);
  assert.ok(!(await w.list(B)).some(x=>x.id===c.id));
@@ -159,4 +160,72 @@ test('migration discovery orders numeric versions, preserves checksums and rolls
  rmSync(join(dir,'02_duplicate.sql'));writeFileSync(join(dir,'1_backfill.sql'),'SELECT 1');await assert.rejects(migrate(isolated,dir),/before applied/);
  rmSync(join(dir,'1_backfill.sql'));rmSync(join(dir,'10_later.sql'));await assert.rejects(migrate(isolated,dir),/missing/);
  }finally{await isolated.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('pasted text is private, idempotent and owner scoped without accepted-state writes',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app);const before=await w.read(A,c.id),history=await w.history(A,c.id);
+ const one=await jobs.importText(A,c.id,{text:'Synthetic offer 😀 £50000'}),two=await jobs.importText(A,c.id,{text:'Synthetic offer 😀 £50000'});
+ assert.equal(one.id,two.id);assert.equal(one.source_id,two.source_id);assert.equal((await jobs.list(A,c.id)).length,1);
+ const after=await w.read(A,c.id);assert.equal(after.sources.length,1);assert.equal(after.sources[0].sensitivity,'private');assert.equal(after.sources[0].original_text,'Synthetic offer 😀 £50000');
+ assert.deepEqual(after.assertions,before.assertions);assert.deepEqual(after.negotiation,before.negotiation);assert.deepEqual(await w.history(A,c.id),history);
+ await fails404(jobs.list(B,c.id));await fails404(jobs.importText(B,c.id,{text:'forged'}));
+ await assert.rejects(jobs.importText(A,c.id,{text:'x',ownerId:B}));
+});
+test('persisted leases resume after restart and fence superseded workers',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-restart');const queued=await jobs.importText(A,c.id,{text:randomUUID()});
+ const first=await jobs.claim(A);assert.ok(first);assert.equal(first.id,queued.id);
+ await db.query("UPDATE ingestion_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",[first.id]);
+ const restarted=new IngestionJobs(app,'test-restart'),second=await restarted.claim(A);assert.ok(second);assert.equal(second.id,first.id);assert.equal(second.attempt,2);
+ assert.equal(await jobs.finish(A,first),false);assert.equal(await restarted.finish(A,second),true);
+ assert.equal((await restarted.list(A,c.id))[0].status,'complete');assert.equal(await restarted.claim(A),undefined);
+ assert.equal((await w.read(A,c.id)).sources.length,1);
+});
+test('failed processing retries to configured cap and timeout preserves saved source',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-retry',3);await jobs.importText(A,c.id,{text:randomUUID()});
+ for(let i=0;i<3;i++)assert.equal(await runOne(jobs,A,async()=>{throw new Error('synthetic failure');}),true);
+ assert.equal(await jobs.claim(A),undefined);const state=(await jobs.list(A,c.id))[0];assert.equal(state.status,'failed');assert.equal(state.attempt,3);
+ const timeout=new IngestionJobs(app,'test-timeout');await timeout.importText(A,c.id,{text:randomUUID()});
+ await runOne(timeout,A,async(_s,signal)=>new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve())),1);
+ const row=(await db.query<{error_code:string}>('SELECT error_code FROM ingestion_jobs WHERE case_id=$1 AND extractor_version=$2',[c.id,'test-timeout'])).rows[0];assert.equal(row.error_code,'timeout');assert.equal((await w.read(A,c.id)).negotiation.revision,0);
+});
+test('late completion after deletion never recreates sources/jobs',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-delete');await jobs.importText(A,c.id,{text:randomUUID()});const job=await jobs.claim(A);assert.ok(job);
+ await w.remove(A,c.id,0);assert.equal(await jobs.finish(A,job),false);
+ for(const table of ['sources','ingestion_jobs'])assert.equal((await db.query(`SELECT id FROM ${table} WHERE case_id=$1`,[c.id])).rows.length,0);
+ await assert.rejects(db.query("INSERT INTO ingestion_jobs(id,case_id,owner_id,source_id,idempotency_key,extractor_version) VALUES($1,$2,$3,$4,'late','v1')",[randomUUID(),c.id,A,job.source_id]));
+});
+test('paste limits count Unicode code points and strict inputs reject files',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-limits');
+ await jobs.importText(A,c.id,{text:'😀'.repeat(100000)});
+ await assert.rejects(jobs.importText(A,c.id,{text:'😀'.repeat(100001)}));
+ await assert.rejects(jobs.importText(A,c.id,{text:'x',file:'unsupported.pdf'}));
+});
+
+test('server Postgres workers claim a queued job only once',{skip:!server},async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-parallel-claim');await jobs.importText(A,c.id,{text:randomUUID()});await jobs.importText(A,c.id,{text:randomUUID()});
+ const claimed=await Promise.all([jobs.claim(A,c.id),jobs.claim(A,c.id),jobs.claim(A,c.id)]);assert.equal(claimed.filter(Boolean).length,2);assert.equal(new Set(claimed.filter(Boolean).map(j=>j!.id)).size,2);
+ const job=claimed.find(Boolean)!;assert.equal(await jobs.finish(B,job),false);assert.equal((await jobs.list(A,c.id))[0].status,'running');assert.equal(await jobs.finish(A,job),true);
+});
+
+test('worker configuration rejects timeout at or beyond lease and empty content',async()=>{
+ const jobs=new IngestionJobs(app,'test-config',3,100);
+ await assert.rejects(runOne(jobs,A,async()=>{},100),/below lease/);
+ await assert.rejects(runOne(jobs,A,async()=>{},101),/below lease/);
+ const c=await fresh();await assert.rejects(jobs.importText(A,c.id,{text:'  \n\t'}));
+});
+
+test('source count and byte caps reject new content but preserve duplicate access',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-caps',3,60000,100000,2,10);
+ const first=await jobs.importText(A,c.id,{text:'12345'});await jobs.importText(A,c.id,{text:'67890'});
+ await assert.rejects(jobs.importText(A,c.id,{text:'third'}),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+ assert.equal((await jobs.importText(A,c.id,{text:'12345'})).id,first.id);assert.equal((await jobs.list(A,c.id)).length,2);
+ const other=await fresh();await assert.rejects(jobs.importText(A,other.id,{text:'12345678901'}),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+ assert.equal((await w.read(A,other.id)).sources.length,0);
+ await assert.rejects(jobs.importText(A,c.id,{text:'bad\0text'}));
+});
+test('import body cap permits worst-case escaped code points and rejects larger transport',async()=>{
+ const escaped='{"text":"'+'\\ud83d\\ude00'.repeat(100000)+'"}';
+ const parsed=await parseBody(new Request('http://127.0.0.1/api/cases',{method:'POST',headers:{'content-type':'application/json'},body:escaped}),1300000);
+ assert.equal(Array.from((parsed as {text:string}).text).length,100000);
+ await assert.rejects(parseBody(new Request('http://127.0.0.1/api/cases',{method:'POST',headers:{'content-type':'application/json'},body:'x'.repeat(1300001)}),1300000),(e:unknown)=>e instanceof WorkbookError&&e.status===413);
 });
