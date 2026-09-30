@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import {postgresDatabase} from '../src/workbook/database';
+import { spawn, fork } from 'node:child_process';
 import assert from 'node:assert/strict';
 const database=process.env.TEST_DATABASE_URL;
 if(!database || new URL(database).pathname!=='/workbook_test')throw new Error('Smoke requires the synthetic workbook_test database');
@@ -28,5 +29,17 @@ try{
  for(const [path,method,body] of [[`/api/cases/${id}`,'GET',undefined],[`/api/cases/${id}`,'PATCH',{title:'stolen',expectedRevision:2}],[`/api/cases/${id}`,'DELETE',{expectedRevision:2}],[`/api/cases/${id}/entries`,'POST',{...manual,expectedRevision:2}],[`/api/cases/${id}/entries/${corrected.data.id}`,'PATCH',{...manual,expectedRevision:2}],[`/api/cases/${id}/history`,'GET',undefined]] as const){assert.equal((await call(path,method,body)).status,404);}
  assert.equal((await call('/api/cases/'+crypto.randomUUID())).status,404);
  await stop();await start('alice');const afterDenied=await call(`/api/cases/${id}`);assert.equal(afterDenied.status,200);assert.deepEqual(afterDenied.data,reload.data);
- console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation.');
+ const imported=await call(`/api/cases/${id}/imports`,'POST',{text:'Synthetic pasted offer'});assert.equal(imported.status,200);
+ const duplicate=await call(`/api/cases/${id}/imports`,'POST',{text:'Synthetic pasted offer'});assert.equal(duplicate.data.id,imported.data.id);
+ const crashing=fork('scripts/job-crash-helper.ts',[],{execArgv:['--import','tsx'],env:{...process.env,ALLOW_SYNTHETIC_IDENTITY:'1',NODE_ENV:'test',DEMO_USER:'alice'},stdio:['ignore','ignore','ignore','ipc']});
+ try{
+  const claimed=await new Promise<{job:{id:string;attempt:number}}>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Worker did not claim')),15000);crashing.once('message',message=>{clearTimeout(timer);resolve(message as {job:{id:string;attempt:number}});});crashing.once('exit',()=>{clearTimeout(timer);reject(new Error('Worker exited before claim'));});});
+  assert.equal(claimed.job.id,imported.data.id);assert.equal(claimed.job.attempt,1);
+ }finally{if(crashing.exitCode===null&&crashing.signalCode===null){const exited=new Promise<void>(resolve=>crashing.once('exit',()=>resolve()));crashing.kill('SIGKILL');await exited;}}
+ const db=postgresDatabase(database!);try{await db.query("UPDATE ingestion_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=$1",[imported.data.id]);}finally{await db.close();}
+ const resumed=spawn(process.execPath,['--import','tsx','src/worker/ingestion.ts'],{env:{...process.env,DATABASE_URL:database,ALLOW_SYNTHETIC_IDENTITY:'1',NODE_ENV:'test',DEMO_USER:'alice'},stdio:'ignore'});
+ assert.equal(await new Promise(resolve=>resumed.once('exit',resolve)),0);
+ const finished=await call(`/api/cases/${id}/imports`);assert.equal(finished.data.length,1);assert.equal(finished.data[0].status,'complete');assert.equal(finished.data[0].attempt,2);
+ const afterImport=await call(`/api/cases/${id}`);assert.equal(afterImport.data.negotiation.revision,2);assert.equal(afterImport.data.assertions.length,2);
+ console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation, idempotent text import and killed-worker recovery.');
 }finally{await stop();}
