@@ -7,6 +7,6 @@ const owner=requireCurrentOwner();const url=process.env.DATABASE_URL;
 if(!url||!['127.0.0.1','localhost','[::1]'].includes(new URL(url).hostname))throw new Error('Local database required');
 const db=postgresDatabase(url);
 try{await migrate(db);const jobs=configuredJobs(appDatabase(db));
- const completed=await runOne(jobs,owner,async()=>{},Number(process.env.INGESTION_TIMEOUT_MS??30000));
+ const completed=await runOne(jobs,owner,async()=>{},Number(process.env.INGESTION_TIMEOUT_MS??30000),process.env.INGESTION_CASE_ID);
  console.log(JSON.stringify({synthetic:true,stage:'text-foundation',completed}));
 }finally{await db.close();}

@@ -202,7 +202,30 @@ test('paste limits count Unicode code points and strict inputs reject files',asy
 });
 
 test('server Postgres workers claim a queued job only once',{skip:!server},async()=>{
- const c=await fresh(),jobs=new IngestionJobs(app,'test-parallel-claim');await jobs.importText(A,c.id,{text:randomUUID()});
- const claimed=await Promise.all([jobs.claim(A),jobs.claim(A),jobs.claim(A)]);assert.equal(claimed.filter(Boolean).length,1);
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-parallel-claim');await jobs.importText(A,c.id,{text:randomUUID()});await jobs.importText(A,c.id,{text:randomUUID()});
+ const claimed=await Promise.all([jobs.claim(A,c.id),jobs.claim(A,c.id),jobs.claim(A,c.id)]);assert.equal(claimed.filter(Boolean).length,2);assert.equal(new Set(claimed.filter(Boolean).map(j=>j!.id)).size,2);
  const job=claimed.find(Boolean)!;assert.equal(await jobs.finish(B,job),false);assert.equal((await jobs.list(A,c.id))[0].status,'running');assert.equal(await jobs.finish(A,job),true);
+});
+
+test('worker configuration rejects timeout at or beyond lease and empty content',async()=>{
+ const jobs=new IngestionJobs(app,'test-config',3,100);
+ await assert.rejects(runOne(jobs,A,async()=>{},100),/below lease/);
+ await assert.rejects(runOne(jobs,A,async()=>{},101),/below lease/);
+ const c=await fresh();await assert.rejects(jobs.importText(A,c.id,{text:'  \n\t'}));
+});
+
+test('source count and byte caps reject new content but preserve duplicate access',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app,'test-caps',3,60000,100000,2,10);
+ const first=await jobs.importText(A,c.id,{text:'12345'});await jobs.importText(A,c.id,{text:'67890'});
+ await assert.rejects(jobs.importText(A,c.id,{text:'third'}),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+ assert.equal((await jobs.importText(A,c.id,{text:'12345'})).id,first.id);assert.equal((await jobs.list(A,c.id)).length,2);
+ const other=await fresh();await assert.rejects(jobs.importText(A,other.id,{text:'12345678901'}),(e:unknown)=>e instanceof WorkbookError&&e.status===422);
+ assert.equal((await w.read(A,other.id)).sources.length,0);
+ await assert.rejects(jobs.importText(A,c.id,{text:'bad\0text'}));
+});
+test('import body cap permits worst-case escaped code points and rejects larger transport',async()=>{
+ const escaped='{"text":"'+'\\ud83d\\ude00'.repeat(100000)+'"}';
+ const parsed=await parseBody(new Request('http://127.0.0.1/api/cases',{method:'POST',headers:{'content-type':'application/json'},body:escaped}),1300000);
+ assert.equal(Array.from((parsed as {text:string}).text).length,100000);
+ await assert.rejects(parseBody(new Request('http://127.0.0.1/api/cases',{method:'POST',headers:{'content-type':'application/json'},body:'x'.repeat(1300001)}),1300000),(e:unknown)=>e instanceof WorkbookError&&e.status===413);
 });
