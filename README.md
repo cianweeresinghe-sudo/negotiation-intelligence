@@ -89,3 +89,17 @@ Fenced completion locks the owned case and job, inserts evidence/pending proposa
 M2c will reuse paste evidence, require explicit classification edits, compare target IDs under the case lock, check client expectedRevision and provide review UI. Sequential acceptance/review/replay gates have not run here. Real adapters, PDFs and live-data controls remain gated.
 
 Validator follow-up: monetary period must follow its own amount in the same clause (within 40 characters, before another amount), text values must appear literally in a quote, and deadline values must be a date-shaped literal or supported ISO normalisation. Identical candidates deduplicate with a safe count. These are conservative lexical checks, not semantic truth/hedge assurance. Multi-amount and uncertainty interpretation still require labelled human evaluation. Newlines/CR/tabs are permitted in model text for real email quotes; NUL and other controls remain forbidden. Terminal validation/limit failures are not auto-retried. Final review decisions cannot transition again under the database trigger. An equal-value active assertion is currently an add proposal with its existing target IDs; M2c must label/handle it as confirmation or duplicate instead of inserting another uncontested field.
+
+### Synthetic import and review (M2c)
+
+Open `/workbook`, create a case, and paste `£52,000 annually`. **Import and extract** runs the deterministic source-only mock and shows a pending proposal with its exact quote. Review its classification and accept, edit or reject. No real model is called. The mock recognises literal GBP amounts followed by `annually`, `annual` or `per year`; it does not yet extract all six domain fields.
+
+When a field already exists, choose correction or disagreement explicitly. Equal values default to **Dismiss duplicate**; replacing their source is a separate explicit choice that shows classification changes. Acceptance preserves private sensitivity, revalidates edited values against the quote, links the original paste evidence, and records edits without rewriting the candidate. Stale requests retain the form values; review changed targets before retrying.
+
+Decided proposals no longer consume the pending-proposal allocation. Historical originals and evidence remain preserved. Source and job limits still apply (20 pasted sources, 60 jobs per case); a case eventually needs a new case when its job allocation is exhausted. This remains a local synthetic demo, with the live-release gates unchanged.
+
+The advisory escaping check uses server-rendered component markup, not a browser. Full visual acceptance must be reported separately. Server-Postgres CI includes the same-proposal writer race and real HTTP checks for import, edit, accept, reject, replay and foreign-owner mutations.
+
+An accepted assertion links the proposal's first evidence row; additional quotes remain reachable through the retained proposal and its accepted-assertion link. The import handler executes the mock synchronously for this demo. A real adapter must execute in a background worker with the provider, consent, budget and abort gates satisfied.
+
+CI now runs a headless Chromium walkthrough against the real Postgres-backed dev server and uploads `m2c-browser-walkthrough` screenshots. It creates a synthetic case, imports text, checks the pending quote and stored advisory text, accepts, and checks the accepted view. This is a functional browser check; screenshot appearance should be inspected before claiming visual acceptance.
