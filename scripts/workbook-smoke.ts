@@ -1,4 +1,8 @@
-import {postgresDatabase} from '../src/workbook/database';
+import {Proposals,runProposalJob} from '../src/proposals/service';
+import {proposalMock} from '../src/proposals/mock';
+import {IngestionJobs} from '../src/ingestion/jobs';
+import {DEMO_OWNERS} from '../src/workbook/identity';
+import {postgresDatabase,appDatabase} from '../src/workbook/database';
 import { spawn, fork } from 'node:child_process';
 import assert from 'node:assert/strict';
 const database=process.env.TEST_DATABASE_URL;
@@ -42,5 +46,11 @@ try{
  const finished=await call(`/api/cases/${id}/imports`);assert.equal(finished.data.length,1);assert.equal(finished.data[0].status,'complete');assert.equal(finished.data[0].attempt,2);
  await stop();await start('bob');assert.equal((await call(`/api/cases/${id}/imports`)).status,404);assert.equal((await call(`/api/cases/${id}/imports`,'POST',{text:'forged import'})).status,404);await stop();await start('alice');
  const afterImport=await call(`/api/cases/${id}`);assert.equal(afterImport.data.negotiation.revision,2);assert.equal(afterImport.data.assertions.length,2);
- console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation, idempotent text import and killed-worker recovery.');
+ const proposalDb=postgresDatabase(database!);try{
+ const app=appDatabase(proposalDb),jobs=new IngestionJobs(app,'smoke-proposals-v1');await jobs.importText(DEMO_OWNERS.alice,id,{text:'😀 £52,000 annually'});
+ assert.equal(await runProposalJob(jobs,new Proposals(app),DEMO_OWNERS.alice,proposalMock,30000,id),true);
+ }finally{await proposalDb.close();}
+ const pending=await call(`/api/cases/${id}/proposals`);assert.equal(pending.status,200);assert.equal(pending.data.proposals.length,1);assert.equal(pending.data.evidence.length,1);
+ const preBob=await call(`/api/cases/${id}`);await stop();await start('bob');assert.equal((await call(`/api/cases/${id}/proposals`)).status,404);await stop();await start('alice');assert.deepEqual((await call(`/api/cases/${id}`)).data,preBob.data);assert.equal(preBob.data.negotiation.revision,2);assert.equal(preBob.data.assertions.length,2);
+ console.log('PASS: real HTTP create/correct/restart persistence, stale writes, forged owner handling and Bob isolation, idempotent text import and killed-worker recovery, pending proposals and Bob proposal isolation.');
 }finally{await stop();}

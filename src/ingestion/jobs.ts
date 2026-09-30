@@ -40,7 +40,7 @@ export class IngestionJobs {
    // Expired workers are fenced by the incremented attempt. Terminal exhaustion
    // remains inspectable; importing duplicate text cannot reset the attempt cap.
    await tx.query("UPDATE ingestion_jobs SET status='failed',lease_expires_at=NULL,error_code='attempts_exhausted',updated_at=now() WHERE owner_id=$1 AND extractor_version=$2 AND status='running' AND lease_expires_at<=now() AND attempt >= $3 AND ($4::uuid IS NULL OR case_id=$4)",[owner,this.version,this.maxAttempts,caseId??null]);
-   const found=(await tx.query<Job>("SELECT * FROM ingestion_jobs WHERE owner_id=$1 AND extractor_version=$2 AND attempt<$3 AND (status IN ('queued','failed') OR (status='running' AND lease_expires_at<=now())) AND ($4::uuid IS NULL OR case_id=$4) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1",[owner,this.version,this.maxAttempts,caseId??null])).rows[0];
+   const found=(await tx.query<Job>("SELECT * FROM ingestion_jobs WHERE owner_id=$1 AND extractor_version=$2 AND attempt<$3 AND (status='queued' OR (status='failed' AND coalesce(error_code,'') NOT IN ('invalid_response','wrong_source','limit_reached')) OR (status='running' AND lease_expires_at<=now())) AND ($4::uuid IS NULL OR case_id=$4) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1",[owner,this.version,this.maxAttempts,caseId??null])).rows[0];
    if(!found)return;
    const job=(await tx.query<Job>("UPDATE ingestion_jobs SET status='running',attempt=attempt+1,lease_expires_at=now()+($3::integer * interval '1 millisecond'),error_code=NULL,updated_at=now() WHERE id=$1 AND owner_id=$2 RETURNING *",[found.id,owner,this.leaseMs])).rows[0];
    const source=(await tx.query<{original_text:string;sensitivity:'private'|'shareable'}>('SELECT original_text,sensitivity FROM sources WHERE id=$1 AND case_id=$2 AND owner_id=$3',[job.source_id,job.case_id,owner])).rows[0];
@@ -48,7 +48,7 @@ export class IngestionJobs {
   });
  }
  validateTimeout(timeoutMs:number){if(!Number.isInteger(timeoutMs)||timeoutMs<1||timeoutMs>120000||timeoutMs>=this.leaseMs)throw new Error('Timeout must be below lease');}
- async finish(owner:string,job:Job,error?:'processing_failed'|'timeout'){
+ async finish(owner:string,job:Job,error?:'processing_failed'|'timeout'|'invalid_response'|'wrong_source'|'limit_reached'){
   // Worker output cannot create or update accepted state. M2b will add validated
   // proposals inside this same fenced transaction, never after completion.
   const result=await this.db.query("UPDATE ingestion_jobs SET status=$4,lease_expires_at=NULL,error_code=$5,updated_at=now() WHERE id=$1 AND owner_id=$2 AND attempt=$3 AND status='running' AND lease_expires_at>now() RETURNING id",[job.id,owner,job.attempt,error?'failed':'complete',error??null]);
@@ -67,5 +67,5 @@ export async function runOne(jobs:IngestionJobs,owner:string,processSource:(sour
 }
 
 export function configuredJobs(db:Database,env:Record<string,string|undefined>=process.env){
- return new IngestionJobs(db,'text-foundation-v1',Number(env.INGESTION_MAX_ATTEMPTS??3),Number(env.INGESTION_LEASE_MS??60000),Number(env.INGESTION_TEXT_LIMIT??100000),Number(env.INGESTION_SOURCE_LIMIT??20),Number(env.INGESTION_BYTE_LIMIT??2097152));
+ return new IngestionJobs(db,env.INGESTION_EXTRACTOR_VERSION??'text-foundation-v1',Number(env.INGESTION_MAX_ATTEMPTS??3),Number(env.INGESTION_LEASE_MS??60000),Number(env.INGESTION_TEXT_LIMIT??100000),Number(env.INGESTION_SOURCE_LIMIT??20),Number(env.INGESTION_BYTE_LIMIT??2097152));
 }
