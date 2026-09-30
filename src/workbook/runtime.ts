@@ -1,15 +1,16 @@
 import { postgresDatabase, migrate, appDatabase } from './database';
 import { requireCurrentOwner } from './identity';
 import { Workbook, WorkbookError } from './service';
+import {AdviceService} from '../advice/service';
 import { Proposals } from '../proposals/service';
 import { IngestionJobs,configuredJobs } from '../ingestion/jobs';
 import { ZodError } from 'zod';
-const globalDb = globalThis as typeof globalThis & { workbookPromise?: Promise<{workbook:Workbook;jobs:IngestionJobs;proposals:Proposals;reviewJobs:IngestionJobs}> };
+const globalDb = globalThis as typeof globalThis & { workbookPromise?: Promise<{workbook:Workbook;jobs:IngestionJobs;proposals:Proposals;reviewJobs:IngestionJobs;advice:AdviceService}> };
 export async function currentWorkbook() {
  const owner=requireCurrentOwner();
  const url=process.env.DATABASE_URL;
  if(!url || !['localhost','127.0.0.1','[::1]'].includes(new URL(url).hostname)) throw new WorkbookError(503,'Local synthetic database is not configured');
- globalDb.workbookPromise ??= (async()=>{const db=postgresDatabase(url);try{await migrate(db);const app=appDatabase(db);return {workbook:new Workbook(app),jobs:configuredJobs(app),proposals:new Proposals(app),reviewJobs:new IngestionJobs(app,'proposals-mock-v1')};}catch(error){await db.close();throw error;}})().catch(error=>{globalDb.workbookPromise=undefined;throw error;});
+ globalDb.workbookPromise ??= (async()=>{const db=postgresDatabase(url);try{await migrate(db);const app=appDatabase(db);return {workbook:new Workbook(app),jobs:configuredJobs(app),proposals:new Proposals(app),reviewJobs:new IngestionJobs(app,'proposals-mock-v1'),advice:new AdviceService(app)};}catch(error){await db.close();throw error;}})().catch(error=>{globalDb.workbookPromise=undefined;throw error;});
  return {owner,...await globalDb.workbookPromise};
 }
 export function guardRequest(request: Request) {
