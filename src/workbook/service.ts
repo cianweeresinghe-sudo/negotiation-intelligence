@@ -24,7 +24,8 @@ export class Workbook {
  }
  async read(ownerId: string, caseId: string) {
   return this.db.transaction(async tx => {
-   const negotiation=await this.owned(tx,ownerId,caseId,true);
+   await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+   const negotiation=await this.owned(tx,ownerId,caseId);
    const assertions=await tx.query<Assertion>('SELECT * FROM assertions WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at,id',[caseId,ownerId]);
    const sources=await tx.query('SELECT * FROM sources WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at,id',[caseId,ownerId]);
    const evidence=await tx.query('SELECT * FROM evidence WHERE case_id=$1 AND owner_id=$2',[caseId,ownerId]);
@@ -48,7 +49,7 @@ export class Workbook {
   });
  }
  private async event(tx:Sql,owner:string,caseId:string,rev:number,op:string,reason:string,before:string[],after:string[],id=randomUUID()) {
-  await tx.query('INSERT INTO events(id,case_id,owner_id,actor_id,revision,operation,reason,before_ids,after_ids) VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8)',[id,caseId,owner,rev,op,reason,before,after]);
+  await tx.query('INSERT INTO events(id,case_id,owner_id,actor_id,revision,operation,reason) VALUES($1,$2,$3,$3,$4,$5,$6)',[id,caseId,owner,rev,op,reason]);
   if(op!=='create_case' && op!=='update_case') {
    for(const [direction,refs] of [['before',before],['after',after]] as const) for(const assertionId of refs)
     await tx.query('INSERT INTO event_assertion_refs(event_id,assertion_id,case_id,owner_id,direction) VALUES($1,$2,$3,$4,$5)',[id,assertionId,caseId,owner,direction]);
@@ -69,7 +70,6 @@ export class Workbook {
   await tx.query('INSERT INTO sources(id,case_id,owner_id,kind,original_text,checksum,sensitivity) VALUES($1,$2,$3,\'manual\',$4,$5,$6)',[sourceId,caseId,owner,text,createHash('sha256').update(text).digest('hex'),sensitivity]);
   await tx.query('INSERT INTO evidence(id,case_id,owner_id,source_id,quote,start_offset,end_offset) VALUES($1,$2,$3,$4,$5,0,$6)',[evidenceId,caseId,owner,sourceId,text,Array.from(text).length]);
   await tx.query('INSERT INTO assertions(id,case_id,owner_id,field,value,currency,period,epistemic_type,sensitivity,source_id,evidence_id,supersedes_id,conflict_group_id) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13)',[id,caseId,owner,input.field,JSON.stringify(input.value),input.currency,input.period,input.epistemicType,sensitivity,sourceId,evidenceId,supersedes,group]);
-  if(group) await tx.query('INSERT INTO conflict_members(conflict_id,assertion_id,case_id,owner_id) VALUES($1,$2,$3,$4)',[group,id,caseId,owner]);
   return id;
  }
  async add(owner:string,caseId:string,raw:unknown) {
@@ -79,9 +79,9 @@ export class Workbook {
    if(active.length){
     if(!input.recordConflict) throw new WorkbookError(409,'Field exists; correct it or explicitly record a conflict');
     group=active[0].conflict_group_id;
+    if(group && !(await tx.query("SELECT id FROM conflicts WHERE id=$1 AND case_id=$2 AND owner_id=$3 AND status='open'",[group,caseId,owner])).rows.length) group=null;
     if(!group){group=randomUUID();await tx.query('INSERT INTO conflicts(id,case_id,owner_id) VALUES($1,$2,$3)',[group,caseId,owner]);
      await tx.query('UPDATE assertions SET conflict_group_id=$4 WHERE case_id=$1 AND owner_id=$2 AND field=$3 AND status=\'active\'',[caseId,owner,input.field,group]);
-     for(const a of active) await tx.query('INSERT INTO conflict_members(conflict_id,assertion_id,case_id,owner_id) VALUES($1,$2,$3,$4)',[group,a.id,caseId,owner]);
     }
    }
    const id=await this.insertAssertion(tx,owner,caseId,input,null,group);
@@ -105,8 +105,7 @@ export class Workbook {
    const group=(await tx.query('SELECT id FROM conflicts WHERE id=$1 AND case_id=$2 AND owner_id=$3 AND status=\'open\'',[conflictId,caseId,owner])).rows[0];
    const members=(await tx.query<Assertion>('SELECT * FROM assertions WHERE conflict_group_id=$1 AND case_id=$2 AND owner_id=$3 AND status=\'active\'',[conflictId,caseId,owner])).rows;
    if(!group || !members.some(a=>a.id===input.keepAssertionId))throw new WorkbookError(404,'Conflict not found');
-   await tx.query('UPDATE assertions SET status=\'retracted\' WHERE conflict_group_id=$1 AND case_id=$2 AND owner_id=$3 AND id<>$4 AND status=\'active\'',[conflictId,caseId,owner,input.keepAssertionId]);
-   await tx.query('UPDATE assertions SET conflict_group_id=NULL WHERE id=$1 AND case_id=$2 AND owner_id=$3',[input.keepAssertionId,caseId,owner]);
+   await tx.query('UPDATE assertions SET status=\'superseded\' WHERE conflict_group_id=$1 AND case_id=$2 AND owner_id=$3 AND id<>$4 AND status=\'active\'',[conflictId,caseId,owner,input.keepAssertionId]);
    const eventId=await this.event(tx,owner,caseId,next,'resolve_conflict','user_resolution',members.map(a=>a.id),[input.keepAssertionId]);
    await tx.query('UPDATE conflicts SET status=\'resolved\',resolution_event_id=$4 WHERE id=$1 AND case_id=$2 AND owner_id=$3',[conflictId,caseId,owner,eventId]);return {revision:next};
   });

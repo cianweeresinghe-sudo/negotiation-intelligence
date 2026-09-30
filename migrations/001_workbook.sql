@@ -21,7 +21,7 @@ CREATE TABLE evidence (
 CREATE TABLE events (
  id uuid PRIMARY KEY, case_id uuid NOT NULL, owner_id uuid NOT NULL, actor_id uuid NOT NULL REFERENCES owners(id),
  revision integer NOT NULL, operation text NOT NULL, reason text NOT NULL CHECK(reason IN ('manual_entry','user_correction','user_resolution','case_created','case_updated')),
- before_ids uuid[] NOT NULL DEFAULT '{}', after_ids uuid[] NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now(),
+ created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(id,case_id), FOREIGN KEY(case_id,owner_id) REFERENCES cases(id,owner_id) ON DELETE CASCADE
 );
 CREATE TABLE conflicts (
@@ -54,13 +54,6 @@ CREATE TRIGGER immutable_events BEFORE UPDATE OR DELETE ON events FOR EACH ROW E
 CREATE FUNCTION protect_source_original() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'original source is immutable'; END $$;
 CREATE TRIGGER immutable_sources BEFORE UPDATE ON sources FOR EACH ROW EXECUTE FUNCTION protect_source_original();
-CREATE TABLE conflict_members (
- conflict_id uuid NOT NULL, assertion_id uuid NOT NULL, case_id uuid NOT NULL, owner_id uuid NOT NULL,
- PRIMARY KEY(conflict_id,assertion_id),
- FOREIGN KEY(case_id,owner_id) REFERENCES cases(id,owner_id) ON DELETE CASCADE,
- FOREIGN KEY(conflict_id,case_id) REFERENCES conflicts(id,case_id) ON DELETE CASCADE,
- FOREIGN KEY(assertion_id,case_id) REFERENCES assertions(id,case_id) ON DELETE CASCADE
-);
 ALTER TABLE events ADD CHECK(actor_id=owner_id);
 CREATE TABLE event_assertion_refs (
  event_id uuid NOT NULL, assertion_id uuid NOT NULL, case_id uuid NOT NULL, owner_id uuid NOT NULL, direction text NOT NULL CHECK(direction IN ('before','after')),
@@ -70,6 +63,8 @@ CREATE TABLE event_assertion_refs (
 );
 DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='workbook_app') THEN CREATE ROLE workbook_app NOLOGIN; END IF; END $$;
 GRANT USAGE ON SCHEMA public TO workbook_app;
-GRANT SELECT,INSERT ON owners,sources,evidence,events,conflict_members,event_assertion_refs TO workbook_app;
+GRANT SELECT,INSERT ON owners,sources,evidence,events,event_assertion_refs TO workbook_app;
 GRANT SELECT,INSERT,UPDATE,DELETE ON cases TO workbook_app;
-GRANT SELECT,INSERT,UPDATE ON assertions,conflicts TO workbook_app;
+GRANT SELECT,INSERT ON assertions,conflicts TO workbook_app;
+GRANT UPDATE(status,conflict_group_id) ON assertions TO workbook_app;
+GRANT UPDATE(status,resolution_event_id) ON conflicts TO workbook_app;

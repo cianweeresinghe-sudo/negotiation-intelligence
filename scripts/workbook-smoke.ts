@@ -5,7 +5,7 @@ if(!database || new URL(database).pathname!=='/workbook_test')throw new Error('S
 const origin='http://127.0.0.1:3101';
 let child:ReturnType<typeof spawn>|undefined;
 async function start(user:string){
- child=spawn(process.execPath,['node_modules/next/dist/bin/next','dev','--hostname','127.0.0.1','--port','3101'],{env:{...process.env,DEMO_USER:user,DATABASE_URL:database,NODE_ENV:'development'},stdio:'ignore'});
+ child=spawn(process.execPath,['node_modules/next/dist/bin/next','dev','--hostname','127.0.0.1','--port','3101'],{env:{...process.env,ALLOW_SYNTHETIC_IDENTITY:'1',DEMO_USER:user,DATABASE_URL:database,NODE_ENV:'development'},stdio:'ignore'});
  for(let i=0;i<120;i++){if(child.exitCode!==null)throw new Error('Dev server exited');try{const r=await fetch(origin+'/api/cases');if(r.ok)return;}catch{}await new Promise(r=>setTimeout(r,500));}
  throw new Error('Dev server did not become ready');
 }
@@ -16,7 +16,7 @@ async function call(path:string,method='GET',body?:unknown,extra:Record<string,s
 }
 try{
  await start('alice');
- const created=await call('/api/cases','POST',{title:'Synthetic HTTP walkthrough'});assert.equal(created.status,200);const id=created.data.id;
+ const created=await call('/api/cases','POST',{title:'Synthetic HTTP walkthrough'});assert.equal(created.status,200,created.data.error);const id=created.data.id;
  const manual={field:'base',value:'50000',currency:'GBP',period:'annual',epistemicType:'counterparty_claim',expectedRevision:0};
  const added=await call(`/api/cases/${id}/entries`,'POST',manual);assert.equal(added.status,200);
  const corrected=await call(`/api/cases/${id}/entries/${added.data.id}`,'PATCH',{...manual,value:'52000',expectedRevision:1});assert.equal(corrected.status,200);

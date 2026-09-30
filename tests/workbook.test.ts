@@ -53,23 +53,24 @@ test('append-only event trigger blocks updates/deletes and source originals rema
  await assert.rejects(db.query('DELETE FROM events WHERE case_id=$1',[c.id]));
  await assert.rejects(db.query('UPDATE sources SET original_text=\'tampered\' WHERE case_id=$1',[c.id]));
 });
-test('explicit conflict resolution preserves membership history',async()=>{
+test('explicit conflict resolution preserves superseded claims and authoritative membership',async()=>{
  const c=await fresh();const first=await w.add(A,c.id,entry);const second=await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});
  const detail=await w.read(A,c.id);assert.equal(detail.conflicts.length,1);assert.equal(detail.assertions.filter(a=>a.status==='active').length,2);
  const conflictId=String(detail.conflicts[0].id);
  await w.resolve(A,c.id,conflictId,{expectedRevision:2,keepAssertionId:second.id});
- const result=await w.read(A,c.id);assert.equal(result.conflicts[0].status,'resolved');assert.equal(result.assertions.find(a=>a.id===first.id)?.status,'retracted');
- const members=await db.query('SELECT * FROM conflict_members WHERE case_id=$1',[c.id]);assert.equal(members.rows.length,2);
+ const result=await w.read(A,c.id);assert.equal(result.conflicts[0].status,'resolved');assert.equal(result.assertions.find(a=>a.id===first.id)?.status,'superseded');
+ assert.ok(result.assertions.every(a=>a.conflict_group_id===conflictId));
+ const history=await db.query("SELECT * FROM event_assertion_refs WHERE event_id=$1 AND direction='before'",[result.conflicts[0].resolution_event_id]);assert.equal(history.rows.length,2);
 });
 test('case deletion cascades every child without orphan history',async()=>{
  const c=await fresh();await w.add(A,c.id,entry);await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});await w.remove(A,c.id,2);await fails404(w.read(A,c.id));
- for(const table of ['assertions','sources','evidence','events','conflicts','conflict_members','event_assertion_refs']){const rows=await db.query(`SELECT * FROM ${table} WHERE case_id=$1`,[c.id]);assert.equal(rows.rows.length,0,table);}
+ for(const table of ['assertions','sources','evidence','events','conflicts','event_assertion_refs']){const rows=await db.query(`SELECT * FROM ${table} WHERE case_id=$1`,[c.id]);assert.equal(rows.rows.length,0,table);}
 });
 test('input rejects forged owner, inference direct writes, floats and oversized text',()=>{
  assert.throws(()=>createCaseInput.parse({title:'Synthetic',ownerId:B}));assert.throws(()=>entryInput.parse({...entry,epistemicType:'ai_inference'}));assert.throws(()=>entryInput.parse({...entry,value:50000}));assert.throws(()=>entryInput.parse({...entry,value:'x'.repeat(2001)}));assert.throws(()=>entryInput.parse({...entry,ownerId:B}));
 });
 test('dev identity is configured server-side, supports two owners and refuses production',()=>{
- assert.equal(requireCurrentOwner({NODE_ENV:'development',DEMO_USER:'alice'}),A);assert.equal(requireCurrentOwner({NODE_ENV:'development',DEMO_USER:'bob'}),B);
+ assert.equal(requireCurrentOwner({ALLOW_SYNTHETIC_IDENTITY:'1',NODE_ENV:'development',DEMO_USER:'alice'}),A);assert.equal(requireCurrentOwner({ALLOW_SYNTHETIC_IDENTITY:'1',NODE_ENV:'development',DEMO_USER:'bob'}),B);
  assert.throws(()=>requireCurrentOwner({NODE_ENV:'production',DEMO_USER:'alice'}));assert.throws(()=>requireCurrentOwner({NODE_ENV:'development'}));
 });
 test('request boundary rejects remote origins and capped bodies',async()=>{
@@ -98,4 +99,21 @@ test('audit failure rolls back inserted assertion, original, evidence and revisi
  const fault:Database={...app,transaction:run=>app.transaction(tx=>run({query:async <T>(sql:string,values?:unknown[])=>{if(sql.startsWith('INSERT INTO events'))throw new Error('synthetic fault');return tx.query<T>(sql,values);}}))};
  await assert.rejects(new Workbook(fault).add(A,c.id,entry),/synthetic fault/);
  assert.deepEqual(await w.read(A,c.id),before);assert.deepEqual(await w.history(A,c.id),history);
+});
+
+test('origin guard handles Next URL normalization without permitting remote hosts',()=>{
+ assert.doesNotThrow(()=>guardRequest(new Request('http://localhost:3101/api/cases',{method:'POST',headers:{host:'127.0.0.1:3101',origin:'http://127.0.0.1:3101'}})));
+ assert.throws(()=>guardRequest(new Request('http://localhost:3101/api/cases',{method:'POST',headers:{host:'attacker.example',origin:'http://attacker.example'}})));
+});
+
+test('server Postgres app role cannot rewrite assertion values/evidence/owner',{skip:!server},async()=>{
+ const c=await fresh();const a=await w.add(A,c.id,entry);
+ for(const sql of ["UPDATE assertions SET value='\"tampered\"'::jsonb WHERE id=$1","UPDATE assertions SET owner_id=owner_id WHERE id=$1","UPDATE assertions SET evidence_id=evidence_id WHERE id=$1"])
+  await assert.rejects(app.query(sql,[a.id]),(e:unknown)=>(e as {code:string}).code==='42501');
+});
+test('correction in a conflict preserves a single authoritative membership chain',async()=>{
+ const c=await fresh();const first=await w.add(A,c.id,entry);await w.add(A,c.id,{...entry,value:'51000',recordConflict:true,expectedRevision:1});
+ const next=await w.correct(A,c.id,first.id,{...entry,value:'52000',expectedRevision:2});
+ const result=await w.read(A,c.id);const group=String(result.conflicts[0].id);
+ assert.ok(result.assertions.every(a=>a.conflict_group_id===group));assert.equal(result.assertions.find(a=>a.id===next.id)?.supersedes_id,first.id);
 });
