@@ -2,7 +2,7 @@
   "synthetic": true,
   "steps": [
     {
-      "source": "Recruiter: annual base GBP 50,000; deadline 5 October.",
+      "source": "Recruiter: Offer GBP 50,000 annually; deadline 5 October.",
       "expect": "Pending counterparty claims with exact evidence; no accepted writes."
     },
     {
@@ -10,7 +10,7 @@
       "expect": "Revision 1; claim classification retained."
     },
     {
-      "source": "Hiring manager: annual base GBP 52,000; deadline 4 October.",
+      "source": "Hiring manager: Offer GBP 52,000 annually; deadline 4 October.",
       "expect": "Propose changes; show conflicts; revision still 1."
     },
     {

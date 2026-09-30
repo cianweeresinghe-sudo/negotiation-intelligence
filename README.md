@@ -115,3 +115,5 @@ Working synthetic paste sample: `Offer: GBP 52,000 annually`. The paste-box plac
 The mock also declines range/hedge paragraphs rather than selecting a bound. It cannot tell whose number is whose: check the quote before accepting and use plain wording. General validator handling of ranged/hedged amounts remains a real-adapter gate.
 
 The mock declines paragraphs longer than 4,000 characters before amount matching. ISO and named calendar dates are masked for range/hedge detection, so a supported offer can include a dated deadline. It still extracts only base in the synthetic format; enter other fields manually.
+
+The second-interaction demo parser accepts `Recruiter: Offer GBP 50,000 annually; deadline 5 October.` It extracts the literal date without guessing a year. Use an offer or recruiter cue; private, first-person, hedged and range paragraphs are declined. A dated deadline may also be put in a separate paragraph with its own recruiter cue. Always check the evidence before accepting.
