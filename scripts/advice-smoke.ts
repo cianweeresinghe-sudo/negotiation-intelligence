@@ -25,10 +25,10 @@ try{
  assert.deepEqual((await call(`/api/cases/${id}`)).data,before.data);assert.deepEqual((await call(`/api/cases/${id}/history`)).data,events.data);
  assert.equal((await call(root,'POST',{...input,ownerId:'22222222-2222-4222-8222-222222222222'})).status,422);
  assert.equal((await call(root,'GET',undefined,{'x-owner-id':'22222222-2222-4222-8222-222222222222'})).status,200);
- const history=(await call(root+'/history')).data;
+ const history=(await call(root+'/history')).data;const explanation=(await call(root+'/'+adviceId+'/changes')).data;
  await stop();await start('bob');
- for(const [path,method,body] of [[root,'GET',undefined],[root+'/history','GET',undefined],[root+'/'+adviceId,'GET',undefined],[root,'POST',input],[root+'/settings','POST',{...input,includePrivateConstraints:true}]] as const)assert.equal((await call(path,method,body)).status,404,path);
- await stop();await start('alice');assert.deepEqual((await call(root+'/history')).data,history);assert.deepEqual((await call(`/api/cases/${id}`)).data,before.data);
+ for(const [path,method,body] of [[root,'GET',undefined],[root+'/history','GET',undefined],[root+'/'+adviceId,'GET',undefined],[root+'/'+adviceId+'/changes','GET',undefined],[root,'POST',input],[root+'/settings','POST',{...input,includePrivateConstraints:true}]] as const)assert.equal((await call(path,method,body)).status,404,path);
+ await stop();await start('alice');assert.deepEqual((await call(root+'/'+adviceId+'/changes')).data,explanation);assert.deepEqual((await call(root+'/history')).data,history);assert.deepEqual((await call(`/api/cases/${id}`)).data,before.data);
  const imported=await call(`/api/cases/${id}/imports`,'POST',{text:'New interaction: recruiter clarifies the offer.'});assert.equal(imported.status,200);
  assert.equal((await call(root)).data.latest.stale,true);assert.equal((await call(root,'POST',input)).status,409);
  const next={expectedRevision:1,expectedMaterialVersion:2};const regenerated=await call(root,'POST',next);assert.equal(regenerated.status,200);assert.notEqual(regenerated.data.id,adviceId);assert.equal(regenerated.data.stale,false);

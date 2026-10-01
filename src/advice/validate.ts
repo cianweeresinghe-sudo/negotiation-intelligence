@@ -28,6 +28,8 @@ export function checkDraft(draft:string|null,snapshot:AdviceSnapshot,claims:read
  const privateRows=snapshot.assertions.filter(a=>a.sensitivity==='private'||!a.outbound_quote_allowed);
  const numbers=numberTokens(draft);if(privateRows.some(a=>numberTokens(a.value).some(n=>numbers.includes(n))))fail('private_value_in_draft');
  if(snapshot.evidence.some(e=>privateRows.some(a=>a.id===e.assertion_id)&&e.quote.length>=8&&draft.toLowerCase().includes(e.quote.toLowerCase())))fail('private_quote_in_draft');
+ // The UI's 'contains no private limits' copy relies on this exact template.
+ // Relaxing this allowlist requires revisiting that copy and the leakage tests.
  if(draft!==GENERIC_DRAFT)fail('draft_not_permitted');
 }
 export function validateAdviceOutput(raw:unknown,snapshot:AdviceSnapshot,privacySnapshot:AdviceSnapshot=snapshot){

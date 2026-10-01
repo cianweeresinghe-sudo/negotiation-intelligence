@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { postgresDatabase, migrate, appDatabase, type Database } from '../src/workbook/database';
+import {latestAdviceView,adviceViewRow} from '../src/advice/view-contract';
 import {AdviceService,snapshotHash} from '../src/advice/service';
+import {proposalMock} from '../src/proposals/mock';
 import {adviceMock} from '../src/advice/mock';
 import type {AdviceAdapter,AdviceSnapshot} from '../src/advice/types';
 import {Proposals,runProposalJob} from '../src/proposals/service';
@@ -28,7 +30,7 @@ before(async()=>{
 after(async()=>{await db.close();});
 async function fresh(owner:string=A){return w.create(owner,{title:`Synthetic ${randomUUID()}`});}
 async function fails404(p:Promise<unknown>){await assert.rejects(p,(e:unknown)=>e instanceof WorkbookError&&e.status===404);}
-test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,5);});
+test('migrations apply twice and expose scoped schema',async()=>{const r=await db.query('SELECT version FROM schema_migrations');assert.equal(r.rows.length,6);});
 test('all owner entry points reject foreign IDs identically',async()=>{
  const c=await fresh(),other=await fresh(B);const added=await w.add(A,c.id,entry);
  assert.ok(!(await w.list(B)).some(x=>x.id===c.id));
@@ -474,4 +476,53 @@ test('hostile advice adapters cannot publish fabricated cross-case source or uns
 });
 test('advice history returns hashes and content without every stored snapshot body',async()=>{
  const {c,service,input}=await adviceCase();const record=await service.generate(A,c.id,input,adviceMock);const history=await service.history(A,c.id);assert.equal('snapshot' in history[0],false);assert.equal((history[0] as any).snapshot_hash,snapshotHash(record.snapshot));assert.ok((await service.read(A,c.id,record.id)).snapshot);
+});
+
+test('source labels are bounded plain text immutable at insert and duplicate import preserves them',async()=>{
+ const c=await fresh(),jobs=new IngestionJobs(app);
+ const first=await jobs.importText(A,c.id,{text:'Offer: GBP 52,000 annually.',label:'Recruiter email'});
+ const duplicate=await jobs.importText(A,c.id,{text:'Offer: GBP 52,000 annually.',label:'Different label'});
+ assert.equal(first.source_id,duplicate.source_id);
+ const source=(await db.query<{label:string}>('SELECT label FROM sources WHERE id=$1',[first.source_id])).rows[0];assert.equal(source.label,'Recruiter email');
+ const second=await jobs.importText(A,c.id,{text:'Recruiter: deadline 5 October.'});
+ assert.equal((await db.query<{label:string}>('SELECT label FROM sources WHERE id=$1',[second.source_id])).rows[0].label,'Pasted text 2');
+ await assert.rejects(()=>jobs.importText(A,c.id,{text:'Another text',label:'x'.repeat(61)}));
+ await assert.rejects(()=>jobs.importText(A,c.id,{text:'Another text',label:'bad\nlabel'}));
+ await assert.rejects(()=>db.query('UPDATE sources SET label=$2 WHERE id=$1',[first.source_id,'rewrite']));
+});
+test('advice explanation derives counter-only states from rows and no accepted facts changed',async()=>{
+ const {c,service,input}=await adviceCase(),saved=await service.generate(A,c.id,input,adviceMock);
+ const jobs=new IngestionJobs(app,'explanation'),proposals=new Proposals(app);
+ await jobs.importText(A,c.id,{text:'Offer: GBP 52,000 annually.',label:'Recruiter <img src=x onerror=alert(1)>'});
+ await runProposalJob(jobs,proposals,A,proposalMock,30000,c.id);
+ const explained=await service.changes(A,c.id,saved.id);
+ assert.equal(explained.summary.acceptedChanges,0);assert.equal(explained.summary.pending,1);assert.equal(explained.acceptedFactsStable,true);assert.match(explained.lines.join(' '),/None of your accepted details changed/);assert.equal(explained.privateNotice,'Private constraints are not used.');
+ await fails404(service.changes(B,c.id,saved.id));
+});
+test('advice explanation correction references persisted before and after ids and stored values',async()=>{
+ const {c,a,service,input}=await adviceCase(),saved=await service.generate(A,c.id,input,adviceMock);
+ const corrected=await w.correct(A,c.id,a.id,{...entry,value:'52000',expectedRevision:1});
+ const explained=await service.changes(A,c.id,saved.id);
+ assert.equal(explained.summary.acceptedChanges,1);assert.equal(explained.acceptedFactsStable,false);assert.match(explained.lines.join(' '),/Corrected: base changed from GBP 50,000 annually to GBP 52,000 annually/);
+ assert.ok(explained.eventReferences.some(r=>r.assertion_id===a.id&&r.direction==='before'));assert.ok(explained.eventReferences.some(r=>r.assertion_id===corrected.id&&r.direction==='after'));
+});
+
+test('advice view parses real service JSON latest record and history shapes',async()=>{
+ const {c,service,input}=await adviceCase(),saved=await service.generate(A,c.id,input,adviceMock);
+ const wire=(value:unknown)=>JSON.parse(JSON.stringify(value));
+ const latest=latestAdviceView.parse(wire(await service.latest(A,c.id)));
+ assert.equal(latest.latest?.id,saved.id);assert.equal(latest.latest?.content.draft,null);
+ const record=adviceViewRow.parse(wire(await service.read(A,c.id,saved.id)));assert.ok(record.content.claims.length);assert.ok(record.snapshot?.evidence.length);
+ for(const row of wire(await service.history(A,c.id)))assert.equal(adviceViewRow.parse(row).id,saved.id);
+ const missingLatest=wire(await service.latest(A,c.id));delete missingLatest.latest;assert.throws(()=>latestAdviceView.parse(missingLatest));
+ const wrongDraft=wire(await service.read(A,c.id,saved.id));delete wrongDraft.content.draft;wrongDraft.content.draft_reply=null;assert.throws(()=>adviceViewRow.parse(wrongDraft));
+});
+test('advice first-use count uses model-visible accepted details and excludes pending suggestions',async()=>{
+ const c=await fresh(),service=new AdviceService(app),jobs=new IngestionJobs(app,'first-use');
+ assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,0);
+ await w.add(A,c.id,{...entry,field:'minimum_base',value:'48000',epistemicType:'user_constraint'});
+ assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,0);
+ await jobs.importText(A,c.id,{text:'Recruiter: Offer GBP 52,000 annually; deadline 5 October.'});await runProposalJob(jobs,new Proposals(app),A,proposalMock,30000,c.id);
+ assert.equal((await service.latest(A,c.id)).pendingSuggestedChanges,2);assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,0);
+ await w.add(A,c.id,{...entry,expectedRevision:1});assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,1);
 });

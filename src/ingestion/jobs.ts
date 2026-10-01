@@ -2,7 +2,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {z} from 'zod';
 import type {Database} from '../workbook/database';
 import {WorkbookError} from '../workbook/service';
-export const pasteInput=z.object({text:z.string().min(1).refine(s=>!s.includes('\0'),'NUL is unsupported').refine(s=>s.trim().length>0,'Text required').refine(s=>Array.from(s).length<=100000,'Text limit exceeded')}).strict();
+export const pasteInput=z.object({label:z.string().trim().min(1).max(60).refine(s=>!/[\x00-\x1f\x7f]/.test(s),'Control characters are unsupported').optional(),text:z.string().min(1).refine(s=>!s.includes('\0'),'NUL is unsupported').refine(s=>s.trim().length>0,'Text required').refine(s=>Array.from(s).length<=100000,'Text limit exceeded')}).strict();
 export type Job={id:string;case_id:string;owner_id:string;source_id:string;status:string;attempt:number;extractor_version:string};
 export type ClaimedJob=Job&{original_text:string;sensitivity:'private'|'shareable'};
 export class IngestionJobs {
@@ -21,7 +21,7 @@ export class IngestionJobs {
    if(!source){
     const usage=(await tx.query<{n:string;bytes:string}>("SELECT count(*)::text AS n,coalesce(sum(octet_length(original_text)),0)::text AS bytes FROM sources WHERE case_id=$1 AND owner_id=$2 AND kind='paste'",[caseId,owner])).rows[0];
     if(Number(usage.n)>=this.maxSources||Number(usage.bytes)+Buffer.byteLength(input.text,'utf8')>this.maxBytes)throw new WorkbookError(422,'Case source limit reached');
-    source={id:randomUUID()};await tx.query("INSERT INTO sources(id,case_id,owner_id,kind,original_text,checksum,sensitivity) VALUES($1,$2,$3,'paste',$4,$5,'private')",[source.id,caseId,owner,input.text,checksum]);}
+    source={id:randomUUID()};await tx.query("INSERT INTO sources(id,case_id,owner_id,kind,original_text,checksum,sensitivity,label) VALUES($1,$2,$3,'paste',$4,$5,'private',$6)",[source.id,caseId,owner,input.text,checksum,input.label??`Pasted text ${Number(usage.n)+1}`]);}
    const key=checksum+':'+this.version;
    const existing=(await tx.query<Job>('SELECT * FROM ingestion_jobs WHERE case_id=$1 AND owner_id=$2 AND idempotency_key=$3',[caseId,owner,key])).rows[0];if(existing)return existing;
    const count=(await tx.query<{n:string}>('SELECT count(*)::text AS n FROM ingestion_jobs WHERE case_id=$1 AND owner_id=$2',[caseId,owner])).rows[0];if(Number(count.n)>=60)throw new WorkbookError(422,'Case job limit reached');
