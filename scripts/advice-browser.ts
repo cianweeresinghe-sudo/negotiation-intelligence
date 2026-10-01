@@ -5,6 +5,12 @@ import assert from 'node:assert/strict';
 // Checklist F7: the second-interaction loop in a real browser, with injected-text assertions.
 // Invented text only. Runs as the dev user alice. Screenshots go to artifacts/.
 const IMG='<img src=x onerror=alert(1)>',LINK='[x](https://example.com)';
+const esc=(t:string)=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+// CTO ruling 1: a user-supplied label must always sit inside curly quotes, never read as app text.
+async function assertLabelsQuoted(page:Page,labels:string[]){
+ const text=await page.locator('section[aria-label="Test advice"]').innerText();
+ for(const label of labels){let from=0,seen=0;for(;;){const at=text.indexOf(label,from);if(at<0)break;seen++;assert.equal(text[at-1],'“',`label ${label} is not opened by a curly quote`);assert.equal(text[at+label.length],'”',`label ${label} is not closed by a curly quote`);from=at+label.length;}assert.ok(seen>0,`label ${label} is not shown`);}
+}
 const review=(page:Page)=>page.locator('section#review-suggested-changes');
 const card=(page:Page,heading:string)=>review(page).locator('article',{has:page.getByRole('heading',{name:heading,exact:true})});
 async function importEmail(page:Page,label:string,text:string){
@@ -43,7 +49,7 @@ export async function advicePaths(origin:string){
   await page.getByText(/using 2 accepted details from your case\./).waitFor();
   await page.getByText('No draft yet. Nothing private is included in drafts.',{exact:true}).waitFor();
   await advice.getByText('Show the evidence behind each point').first().click();
-  await advice.getByText(`${IMG} says base salary`,{exact:true}).first().waitFor();
+  await advice.getByText(new RegExp(`“${esc(IMG)}” says base salary`)).first().waitFor();
   await page.screenshot({path:'artifacts/m3b-advice-first.png',fullPage:true});
 
   // F3: second email makes the advice stale, with the pending-changes line and the route to review.
@@ -72,18 +78,28 @@ export async function advicePaths(origin:string){
   await page.getByText('This advice is up to date.',{exact:true}).waitFor();
   await advice.getByRole('heading',{name:'What changed since the previous advice',exact:true}).waitFor();
   await page.getByText('Corrected: base changed from GBP 50,000 annually to GBP 52,000 annually.',{exact:true}).waitFor();
-  await page.getByText(`${LINK} says deadline 4 October (you accepted this on`).waitFor();
-  await page.getByText(`Still unresolved: ${IMG} says 5 October; ${LINK} says 4 October. You can leave this open.`,{exact:true}).waitFor();
+  await page.getByText(new RegExp(`“${esc(LINK)}” says deadline 4 October \\(you accepted this on`)).waitFor();
+  await assertLabelsQuoted(page,[IMG,LINK]);
+  await page.getByText(new RegExp(`Still unresolved: “${esc(IMG)}” says 5 October; “${esc(LINK)}” says 4 October\\. You can leave this open\\.`)).waitFor();
   const claimText=(await advice.locator('article').allInnerTexts()).join('\n');
   // The mock's sentence is read by testers: no raw type name, and the amount has a thousands separator.
   assert.doesNotMatch(claimText,/counterparty_claim|\b52000\b/,'raw type name or unformatted amount in the advice');assert.match(claimText,/52,000/);
   assert.match(claimText,/unresolved/i);assert.doesNotMatch(claimText,/\b(?:4|5)(?:st|nd|rd|th)?\s+October\b|\bOctober\s+(?:4|5)\b/i,'the advice states a disputed date');
   await page.screenshot({path:'artifacts/m3b-advice-regenerated.png',fullPage:true});
 
-  // History keeps the earlier advice, marked as earlier and out of date.
+  // History keeps the earlier advice. Opening it must not offer to regenerate, must mark the open row and must lead back.
   const rows=advice.getByRole('button',{name:/· (Out of date|Current) · based on \d+ accepted details/});assert.equal(await rows.count(),2);
   await advice.getByRole('button',{name:/· Out of date · based on 2 accepted details/}).click();
   await page.getByText('This is earlier advice. It is kept for reference and may not match your case now.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Get updated advice',exact:true}).count(),0,'regenerate is offered on earlier advice');
+  await page.getByText('Back to current advice',{exact:true}).waitFor();
+  await advice.getByRole('heading',{name:'What changed since this advice was written',exact:true}).waitFor();
+  assert.equal(await advice.locator('button[aria-current="true"]').count(),1);await advice.getByText('Viewing').first().waitFor();
+  await assertLabelsQuoted(page,[IMG,LINK]);
+  await page.screenshot({path:'artifacts/m3b-advice-earlier-open.png',fullPage:true});
+  await page.getByText('Back to current advice',{exact:true}).click();
+  await page.getByText('This advice is up to date.',{exact:true}).waitFor();
+  assert.equal(await advice.getByText('This is earlier advice.',{exact:false}).count(),0);
   await page.screenshot({path:'artifacts/m3b-advice-history.png',fullPage:true});
 
   // F6: the recruiter confirms. A proposal appears and nothing resolves on its own.
