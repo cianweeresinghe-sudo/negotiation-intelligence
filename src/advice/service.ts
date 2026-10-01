@@ -83,11 +83,11 @@ export class AdviceService{
   const lines:string[]=[];
   for(const eventId of new Set(refs.map(r=>r.event_id))){
    const group=refs.filter(r=>r.event_id===eventId),before=group.filter(r=>r.direction==='before').map(r=>visible.find(a=>a.id===r.assertion_id)!),after=group.filter(r=>r.direction==='after').map(r=>visible.find(a=>a.id===r.assertion_id)!);
-   for(const a of after){if(before.length&&a.supersedes_id===before[0].id)lines.push(`Corrected: ${a.field} changed from ${format(before[0])} to ${format(a)}.`);else lines.push(`${a.label?`${a.label} says`:'You entered'} ${a.field} ${format(a)} (you accepted this on ${new Date(group[0].created_at).toLocaleString('en-GB',{timeZone:'UTC'})+' UTC'}).`);}
+   for(const a of after){if(before.length&&a.supersedes_id===before[0].id)lines.push(`Corrected: ${a.field} changed from ${format(before[0])} to ${format(a)}.`);else lines.push(`${a.label?`“${a.label}” says`:'You entered'} ${a.field} ${format(a)} (you accepted this on ${new Date(group[0].created_at).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}).`);}
   }
   const open=(await tx.query<{id:string}>("SELECT id FROM conflicts WHERE case_id=$1 AND owner_id=$2 AND status='open' ORDER BY id",[caseId,owner])).rows;
   const conflicts=open.map(g=>({id:g.id,members:visible.filter(a=>a.status==='active'&&a.conflict_group_id===g.id)})).filter(g=>g.members.length>1);
-  for(const group of conflicts){const [a,b]=group.members;lines.push(`Still unresolved: ${a.label??'Manual entry'} says ${format(a)}; ${b.label??'Manual entry'} says ${format(b)}. You can leave this open.`);}
+  for(const group of conflicts){const [a,b]=group.members;lines.push(`Still unresolved: ${a.label?`“${a.label}” says`:'You entered'} ${format(a)}; ${b.label?`“${b.label}” says`:'You entered'} ${format(b)}. You can leave this open.`);}
   const oldStatuses=new Map(baseline.proposalStates.map(p=>[p.id,p.status]));
   for(const p of proposals.filter(p=>p.status==='rejected'&&oldStatuses.get(p.id)!=='rejected'))lines.push(`Rejected: you rejected a suggested ${p.candidate.field}. It was not used.`);
   if(summary.pending)lines.push(`Waiting for review: ${summary.pending} suggested change(s). Not used in this advice.`);
