@@ -2,20 +2,20 @@
   "synthetic": true,
   "steps": [
     {
-      "source": "Recruiter: annual base GBP 50,000; deadline 5 October.",
+      "source": "Recruiter: Offer GBP 50,000 annually; deadline 5 October.",
       "expect": "Pending counterparty claims with exact evidence; no accepted writes."
     },
     {
-      "review": "Accept base/deadline at revision 0.",
-      "expect": "Revision 1; claim classification retained."
+      "review": "Accept base then deadline sequentially, starting at revision 0.",
+      "expect": "Revision 2; claim classification retained."
     },
     {
-      "source": "Hiring manager: annual base GBP 52,000; deadline 4 October.",
-      "expect": "Propose changes; show conflicts; revision still 1."
+      "source": "Hiring manager: Offer GBP 52,000 annually; deadline 4 October.",
+      "expect": "Propose changes; show conflicts; revision still 2."
     },
     {
       "review": "User confirms revised base but deadline uncertain.",
-      "expect": "Revision 2; base superseded with provenance; accepted deadline claims share an open conflict_group_id; confirmed deadline unknown."
+      "expect": "Revision 4; base superseded with provenance; accepted deadline claims share an open conflict_group_id; confirmed deadline unknown."
     },
     {
       "advice": "Ask recruiter to confirm deadline before choosing timing.",

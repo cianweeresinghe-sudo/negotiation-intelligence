@@ -48,3 +48,19 @@ test('mock declines oversized paragraphs before running the amount regex',async(
 test('ISO and named deadlines do not turn a supported offer into a money range',async()=>{
  for(const text of ['Offer: GBP 52,000 annually. Reply by 2026-10-05.','Offer: GBP 52,000 annually, valid from 5 October.']){const s=source(text);assert.deepEqual(validateCandidates(await proposalMock.extract(s,new AbortController().signal),s).candidates.map(c=>c.value),['52000']);}
 });
+test('mock deadline table preserves exact dates and paragraph privacy',async()=>{
+ const rows:[string,[string,string][]][]=[
+ ['Recruiter: Offer GBP 50,000 annually; deadline 5 October.',[['base','50000'],['deadline','5 October']]],
+ ['My deadline is 5 October',[]],['Recruiter: deadline around 5 October',[]],
+ ['Recruiter: deadline 5 October.\n\nHiring manager: deadline 4 October.',[['deadline','5 October'],['deadline','4 October']]],
+ ['Recruiter confirms 5 October deadline.',[['deadline','5 October']]],
+ ['The recruiter confirms 7 October start date.',[]],
+ ['Recruiter confirms 12 October interview.',[]],
+ ['We confirm 5 October for the onboarding call. Offer: GBP 52,000 annually.',[['base','52000']]],
+ ['Recruiter: deadline 5 October; my minimum is GBP 48,000 annually.',[]],
+ ['Recruiter: deadline 5-6 October.',[]],
+ ['Recruiter: deadline between 5 October and 6 October.',[]],
+ ['Recruiter: deadline 5 October to 6 October.',[]]
+ ];
+ for(const [text,expected] of rows){const s=source(text),result=validateCandidates(await proposalMock.extract(s,new AbortController().signal),s);assert.deepEqual(result.candidates.map(c=>[c.field,c.value]),expected,text);for(const candidate of result.candidates)for(const evidence of candidate.evidence)assert.ok(text.includes(evidence.quote));}
+});
