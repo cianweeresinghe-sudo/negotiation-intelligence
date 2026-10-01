@@ -69,6 +69,8 @@ try{
  const content=clarified.content as {situation:string;claims:{text:string;assertion_ids:string[]}[]};
  const conflictClaims=content.claims.filter(c=>deadlines.every(a=>c.assertion_ids.includes(a.id)));assert.ok(conflictClaims.length>0,'a claim cites both deadlines');
  for(const c of conflictClaims){assert.match(c.text,/unresolved|disputed|clarify/i);assert.doesNotMatch(c.text,/\b(4|5)\b|October/i,c.text);}
+ // While the conflict is open, no field of the advice may state either date.
+ assert.doesNotMatch(JSON.stringify(clarified.content),/\b(?:4|5)(?:st|nd|rd|th)?\s+October\b|\bOctober\s+(?:4|5)\b/i,'advice states a disputed date');
  const history=(await call(`/api/cases/${id}/advice/history`)).data as {id:string;stale:boolean}[];
  assert.equal(history.length,2);assert.equal(history.find(h=>h.id===firstAdvice.id)!.stale,true);assert.equal(history.find(h=>h.id===clarified.id)!.stale,false);
  for(const h of history)assert.ok(!('snapshot' in h),'history carries no snapshot body');
