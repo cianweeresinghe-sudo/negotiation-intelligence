@@ -26,6 +26,7 @@ export class IngestionJobs {
    const existing=(await tx.query<Job>('SELECT * FROM ingestion_jobs WHERE case_id=$1 AND owner_id=$2 AND idempotency_key=$3',[caseId,owner,key])).rows[0];if(existing)return existing;
    const count=(await tx.query<{n:string}>('SELECT count(*)::text AS n FROM ingestion_jobs WHERE case_id=$1 AND owner_id=$2',[caseId,owner])).rows[0];if(Number(count.n)>=60)throw new WorkbookError(422,'Case job limit reached');
    await tx.query('INSERT INTO ingestion_jobs(id,case_id,owner_id,source_id,idempotency_key,extractor_version) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(case_id,idempotency_key) DO NOTHING',[randomUUID(),caseId,owner,source.id,key,this.version]);
+   await tx.query('UPDATE cases SET material_version=material_version+1 WHERE id=$1 AND owner_id=$2',[caseId,owner]);
    return (await tx.query<Job>('SELECT * FROM ingestion_jobs WHERE case_id=$1 AND owner_id=$2 AND idempotency_key=$3',[caseId,owner,key])).rows[0];
   });
  }
