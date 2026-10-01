@@ -90,8 +90,9 @@ export async function advicePaths(origin:string){
 
   // Private switch: off by default, changed only by the checkbox, with the state shown next to the advice.
   const box=page.getByLabel('Include private limits and alternatives in test advice');assert.equal(await box.isChecked(),false);
-  await box.check();await page.getByText('Private figures are included in this test advice. Nothing leaves the app.',{exact:true}).waitFor();
-  await box.uncheck();await page.getByText('Private constraints are not used.',{exact:true}).waitFor();
+  // The box is controlled and updates after the settings request, so click and wait for the text instead of check().
+  await box.click();await page.getByText('Private figures are included in this test advice. Nothing leaves the app.',{exact:true}).waitFor();assert.equal(await box.isChecked(),true);
+  await box.click();await page.getByText('Private constraints are not used.',{exact:true}).waitFor();assert.equal(await box.isChecked(),false);
 
   // Injected text is data: no image, no external link, no script dialog, no page error.
   assert.equal(await page.locator('img').count(),0);assert.equal(await page.locator('a[href^="http"]').count(),0);
