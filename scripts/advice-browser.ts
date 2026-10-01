@@ -43,7 +43,7 @@ export async function advicePaths(origin:string){
   await page.getByText(/using 2 accepted details from your case\./).waitFor();
   await page.getByText('No draft yet. Nothing private is included in drafts.',{exact:true}).waitFor();
   await advice.getByText('Show the evidence behind each point').first().click();
-  await advice.getByText(`${IMG} says base`,{exact:true}).first().waitFor();
+  await advice.getByText(`${IMG} says base salary`,{exact:true}).first().waitFor();
   await page.screenshot({path:'artifacts/m3b-advice-first.png',fullPage:true});
 
   // F3: second email makes the advice stale, with the pending-changes line and the route to review.
