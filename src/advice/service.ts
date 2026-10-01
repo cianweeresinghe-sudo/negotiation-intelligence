@@ -48,7 +48,13 @@ export class AdviceService{
  async latest(owner:string,caseId:string){return this.db.transaction(async tx=>{
   await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');const c=await this.owned(tx,owner,caseId);
   const row=(await tx.query<RecordRow>('SELECT * FROM advice_records WHERE case_id=$1 AND owner_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1',[caseId,owner])).rows[0];
-  return {latest:row?{...row,stale:row.revision!==c.revision||row.material_version!==c.material_version}:null,revision:c.revision,materialVersion:c.material_version,includePrivateConstraints:c.include_private_constraints};
+  const active=(await tx.query<AcceptedAssertion>("SELECT id,field,epistemic_type,conflict_group_id FROM assertions WHERE case_id=$1 AND owner_id=$2 AND status='active'",[caseId,owner])).rows;
+  const visible=active.filter(a=>c.include_private_constraints||(['base','deadline'].includes(a.field)&&['counterparty_claim','documented_observation'].includes(a.epistemic_type)));
+  const visibleIds=new Set(visible.map(a=>a.id));
+  const hiddenGroups=new Set(active.filter(a=>!visibleIds.has(a.id)&&a.conflict_group_id).map(a=>a.conflict_group_id));
+  const modelVisibleDetailCount=visible.filter(a=>!a.conflict_group_id||!hiddenGroups.has(a.conflict_group_id)).length;
+  const pending=(await tx.query<{n:number}>("SELECT count(*)::integer AS n FROM proposals WHERE case_id=$1 AND owner_id=$2 AND status='pending'",[caseId,owner])).rows[0].n;
+  return {modelVisibleDetailCount,pendingSuggestedChanges:pending,latest:row?{...row,stale:row.revision!==c.revision||row.material_version!==c.material_version}:null,revision:c.revision,materialVersion:c.material_version,includePrivateConstraints:c.include_private_constraints};
  });}
  async history(owner:string,caseId:string){return this.db.transaction(async tx=>{
   await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');const c=await this.owned(tx,owner,caseId);
@@ -73,11 +79,11 @@ export class AdviceService{
   const visible=details.filter(a=>current.include_private_constraints||(['base','deadline'].includes(a.field)&&['counterparty_claim','documented_observation'].includes(a.epistemic_type)));
   const visibleIds=new Set(visible.map(a=>a.id));
   const refs=(await tx.query<{event_id:string;assertion_id:string;direction:string;revision:number;created_at:string;operation:string}>(`SELECT r.event_id,r.assertion_id,r.direction,e.revision,e.created_at,e.operation FROM events e JOIN event_assertion_refs r ON r.event_id=e.id AND r.case_id=e.case_id AND r.owner_id=e.owner_id WHERE e.case_id=$1 AND e.owner_id=$2 AND e.revision>$3 ORDER BY e.revision,r.direction,r.assertion_id`,[caseId,owner,saved.revision])).rows.filter(r=>visibleIds.has(r.assertion_id));
-  const format=(a:typeof details[number])=>[a.currency,a.value,a.period==='annual'?'annually':a.period==='monthly'?'monthly':a.period==='one_time'?'one time':null].filter(Boolean).join(' ');
+  const format=(a:typeof details[number])=>[a.currency,a.currency&&/^\d+(?:\.\d+)?$/.test(a.value)?a.value.replace(/\B(?=(\d{3})+(?!\d))/g,','):a.value,a.period==='annual'?'annually':a.period==='monthly'?'monthly':a.period==='one_time'?'one time':null].filter(Boolean).join(' ');
   const lines:string[]=[];
   for(const eventId of new Set(refs.map(r=>r.event_id))){
    const group=refs.filter(r=>r.event_id===eventId),before=group.filter(r=>r.direction==='before').map(r=>visible.find(a=>a.id===r.assertion_id)!),after=group.filter(r=>r.direction==='after').map(r=>visible.find(a=>a.id===r.assertion_id)!);
-   for(const a of after){if(before.length&&a.supersedes_id===before[0].id)lines.push(`Corrected: ${a.field} changed from ${format(before[0])} to ${format(a)}.`);else lines.push(`${a.label??'Manual entry'} says ${a.field} ${format(a)} (you accepted this on ${new Date(group[0].created_at).toISOString()}).`);}
+   for(const a of after){if(before.length&&a.supersedes_id===before[0].id)lines.push(`Corrected: ${a.field} changed from ${format(before[0])} to ${format(a)}.`);else lines.push(`${a.label?`${a.label} says`:'You entered'} ${a.field} ${format(a)} (you accepted this on ${new Date(group[0].created_at).toLocaleString('en-GB',{timeZone:'UTC'})+' UTC'}).`);}
   }
   const open=(await tx.query<{id:string}>("SELECT id FROM conflicts WHERE case_id=$1 AND owner_id=$2 AND status='open' ORDER BY id",[caseId,owner])).rows;
   const conflicts=open.map(g=>({id:g.id,members:visible.filter(a=>a.status==='active'&&a.conflict_group_id===g.id)})).filter(g=>g.members.length>1);

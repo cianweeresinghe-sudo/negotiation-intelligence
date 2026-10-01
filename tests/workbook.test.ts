@@ -503,7 +503,7 @@ test('advice explanation correction references persisted before and after ids an
  const {c,a,service,input}=await adviceCase(),saved=await service.generate(A,c.id,input,adviceMock);
  const corrected=await w.correct(A,c.id,a.id,{...entry,value:'52000',expectedRevision:1});
  const explained=await service.changes(A,c.id,saved.id);
- assert.equal(explained.summary.acceptedChanges,1);assert.equal(explained.acceptedFactsStable,false);assert.match(explained.lines.join(' '),/Corrected: base changed from GBP 50000 annually to GBP 52000 annually/);
+ assert.equal(explained.summary.acceptedChanges,1);assert.equal(explained.acceptedFactsStable,false);assert.match(explained.lines.join(' '),/Corrected: base changed from GBP 50,000 annually to GBP 52,000 annually/);
  assert.ok(explained.eventReferences.some(r=>r.assertion_id===a.id&&r.direction==='before'));assert.ok(explained.eventReferences.some(r=>r.assertion_id===corrected.id&&r.direction==='after'));
 });
 
@@ -516,4 +516,13 @@ test('advice view parses real service JSON latest record and history shapes',asy
  for(const row of wire(await service.history(A,c.id)))assert.equal(adviceViewRow.parse(row).id,saved.id);
  const missingLatest=wire(await service.latest(A,c.id));delete missingLatest.latest;assert.throws(()=>latestAdviceView.parse(missingLatest));
  const wrongDraft=wire(await service.read(A,c.id,saved.id));delete wrongDraft.content.draft;wrongDraft.content.draft_reply=null;assert.throws(()=>adviceViewRow.parse(wrongDraft));
+});
+test('advice first-use count uses model-visible accepted details and excludes pending suggestions',async()=>{
+ const c=await fresh(),service=new AdviceService(app),jobs=new IngestionJobs(app,'first-use');
+ assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,0);
+ await w.add(A,c.id,{...entry,field:'minimum_base',value:'48000',epistemicType:'user_constraint'});
+ assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,0);
+ await jobs.importText(A,c.id,{text:'Recruiter: Offer GBP 52,000 annually; deadline 5 October.'});await runProposalJob(jobs,new Proposals(app),A,proposalMock,30000,c.id);
+ assert.equal((await service.latest(A,c.id)).pendingSuggestedChanges,2);assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,0);
+ await w.add(A,c.id,{...entry,expectedRevision:1});assert.equal((await service.latest(A,c.id)).modelVisibleDetailCount,1);
 });
