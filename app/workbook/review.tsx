@@ -13,7 +13,7 @@ export default function Review({caseId,revision,assertions,reload}:{caseId:strin
  useEffect(()=>{void load().catch(e=>setMessage(e.message));},[caseId]); // Drafts survive revision reloads.
  async function act(fn:()=>Promise<void>){setBusy(true);setMessage('');try{await fn();await reload();await load();}catch(e){setMessage(e instanceof Error?e.message:'Review failed');await reload();await load();}finally{setBusy(false);}}
  return <section><h2>Import and review · deterministic mock</h2><p>Invented text only. Supported extraction is limited; this is a pipeline demo.</p>
- <form onSubmit={e=>{e.preventDefault();void act(async()=>{await api('proposals/import',{text});setText('');});}}><label>Paste original source<textarea value={text} onChange={e=>setText(e.target.value)} required maxLength={100000}/></label><button disabled={busy}>Import and extract</button></form>
+ <form onSubmit={e=>{e.preventDefault();void act(async()=>{await api('proposals/import',{text});setText('');});}}><label>Paste original source<textarea placeholder="Offer: GBP 52,000 annually" value={text} onChange={e=>setText(e.target.value)} required maxLength={100000}/></label><button disabled={busy}>Import and extract</button></form>
  {message&&<p role="alert">{message}. Your review edits are retained; check the current workbook before retrying.</p>}
  {jobs.map((j,i)=><JobOutcome key={i} job={j}/>)}
  {rows.map(p=><Card key={p.id} proposal={p} quotes={evidence.filter(e=>e.proposal_id===p.id).map(e=>e.quote)} active={assertions.filter(a=>a.status==='active'&&a.field===p.candidate.field)} revision={revision} busy={busy} submit={(action,body)=>act(async()=>{await api(`proposals/${p.id}/${action}`,body);})}/>)}

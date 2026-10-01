@@ -10,7 +10,7 @@ export async function reviewBrowser(origin:string,database:string){
   page.on('pageerror',e=>errors.push(e.message));await page.goto(origin+'/workbook');
   const title=`Browser synthetic ${randomUUID()}`;await page.getByLabel('Case title').fill(title);
   const created=page.waitForResponse(r=>r.url()===origin+'/api/cases'&&r.request().method()==='POST');await page.getByRole('button',{name:'Create',exact:true}).click();const caseId=(await (await created).json()).id;
-  await page.getByRole('heading',{name:title,exact:true}).waitFor();await page.getByLabel('Paste original source').fill('£52,000 annually');await page.getByRole('button',{name:'Import and extract',exact:true}).click();
+  await page.getByRole('heading',{name:title,exact:true}).waitFor();await page.getByLabel('Paste original source').fill('Offer: £52,000 annually');await page.getByRole('button',{name:'Import and extract',exact:true}).click();
   await page.getByRole('heading',{name:'base: 52000 · pending',exact:true}).waitFor();
   // Use the persisted column names to verify the real job-to-screen path.
   const db=postgresDatabase(database);try{await db.query('UPDATE ingestion_jobs SET advisory_unknowns=$2::jsonb,advisory_conflicts=$3::jsonb WHERE case_id=$1',[caseId,JSON.stringify(['Unknown <img src=x onerror=alert(1)>']),JSON.stringify(['Conflict [details](https://example.com)'])]);}finally{await db.close();}

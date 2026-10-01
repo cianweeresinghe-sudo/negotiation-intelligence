@@ -35,12 +35,11 @@ test('expected drops are checked: a kept candidate or a wrong reason is a failur
  const shouldKeep=loadCases().find(c=>c.id==='irrelevant_wording') as Case;const asDrop:Case={...shouldKeep,expected_candidates:[],expected_dropped:[{...shouldKeep.expected_candidates[0],reason:'unsupported_value'}]};
  const r2=await runCase(asDrop);assert.equal(r2.status,'fail');assert.equal(r2.validator_replay[0].outcome,'kept_unexpectedly');
 });
-// Known finding, pinned so it stays visible: the deterministic mock extractor reads
-// "My private minimum is GBP 48,000 annually." as a base candidate. The validator cannot
-// tell, because the amount and period are in the quote. Update this when the mock changes.
-test('known finding: the mock extractor labels a private minimum as base',async()=>{
+// Regression for the private-position finding: the mock must decline it,
+// independently of validator replay. This remains a pipeline check, not model quality.
+test('mock extractor declines private minimum instead of labelling it base',async()=>{
  const report=await runFixtures();
- for(const id of ['private_floor','disclosure_injection']){const r=report.results.find(x=>x.id===id)!;assert.equal(r.mock_extraction,'fail',id);assert.match(r.mock_detail,/extra base:48000:GBP:annual/,id);}
+ for(const id of ['private_floor','disclosure_injection']){const r=report.results.find(x=>x.id===id)!;assert.equal(r.mock_extraction,'pass',id);assert.doesNotMatch(r.mock_detail,/extra base/,id);}
 });
 test('runner is not vacuous: mutated expectations are reported as failures',async()=>{
  const base=loadCases().find(c=>c.id==='irrelevant_wording') as Case;assert.equal((await runCase(base)).status,'pass');

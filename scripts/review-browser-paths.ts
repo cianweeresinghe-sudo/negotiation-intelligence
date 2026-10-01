@@ -24,7 +24,7 @@ export async function reviewPaths(origin:string){
   mkdirSync('artifacts',{recursive:true});
 
   // 1. Reject: the proposal is decided and the workbook and revision are unchanged.
-  await newCase(page,origin,'Browser reject');await importText(page,'£52,000 annually');
+  await newCase(page,origin,'Browser reject');await importText(page,'Offer: £52,000 annually');
   await page.getByRole('heading',{name:'base: 52000 · pending',exact:true}).waitFor();
   await page.getByRole('button',{name:'Reject',exact:true}).click();
   await page.getByRole('heading',{name:'base: 52000 · rejected',exact:true}).waitFor();
@@ -36,7 +36,7 @@ export async function reviewPaths(origin:string){
   // 2. Equal value: default is to dismiss as a duplicate, leaving the manual entry untouched.
   await newCase(page,origin,'Browser duplicate');await addManual(page,'52000');
   await page.getByText('Revision 1',{exact:true}).waitFor();await page.getByText('Original manual entry',{exact:true}).waitFor();
-  await importText(page,'£52,000 annually');
+  await importText(page,'Offer: £52,000 annually');
   await page.getByRole('heading',{name:'base: 52000 · pending',exact:true}).waitFor();
   await page.getByText('Same value: dismiss as duplicate to preserve the accepted source.',{exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Replace with this source',exact:true}).isDisabled(),true);
@@ -47,7 +47,7 @@ export async function reviewPaths(origin:string){
   await page.screenshot({path:'artifacts/m2c-duplicate.png',fullPage:true});
 
   // 3. Changed target: a different active value forces an explicit decision and acknowledgement.
-  const target=await newCase(page,origin,'Browser changed target');await importText(page,'£52,000 annually');
+  const target=await newCase(page,origin,'Browser changed target');await importText(page,'Offer: £52,000 annually');
   await page.getByRole('heading',{name:'base: 52000 · pending',exact:true}).waitFor();
   const pid=((await (await page.request.get(`${origin}/api/cases/${target.id}/proposals`)).json()).proposals[0].id) as string;
   await addManual(page,'50000');await page.getByText('Revision 1',{exact:true}).waitFor();

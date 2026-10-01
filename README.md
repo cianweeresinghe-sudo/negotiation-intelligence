@@ -107,3 +107,11 @@ CI now runs a headless Chromium walkthrough against the real Postgres-backed dev
 ### Fixture runner
 
 `npm run fixtures:run` replays `fixtures/CASES.json` through the extraction validator and the deterministic mock extractor and prints a per-case table with drop reason codes. Statuses are `pass`, `fail` and `unsupported_field`. "Validator replay" feeds each expected candidate back as model output, so it shows the fixture is acceptable to the validator, not that an extractor would find it. The mock column is the only extraction-accuracy signal, and the mock is a regex parser, not a model. Unknowns, conflict fields, forbidden draft values and state effects are not scored yet. `tests/fixtures.test.ts` pins the current per-case baseline, so any change in it is deliberate.
+
+The synthetic offer parser declines paragraphs containing listed first-person or private-position markers and requires a counterparty cue. Blank lines separate paragraphs; a label and amount on adjacent lines stay together. It deliberately declines legitimate phrases such as “Offer for my role” or “Minimum guaranteed base”; use manual entry if no terms are found. A separate offer paragraph without these markers can still be extracted. This demo safeguard cannot establish whose amount a passage represents and makes no claim about real-model behaviour.
+
+Working synthetic paste sample: `Offer: GBP 52,000 annually`. The paste-box placeholder and walkthroughs use this supported format. Known gap: `Offer letter attached.\nTarget: GBP 48,000 annually (don't mention).` still yields base 48000 because the privacy wording is not one of the markers. Keep synthetic demo wording plain and review each quote; do not treat this parser as an authority detector.
+
+The mock also declines range/hedge paragraphs rather than selecting a bound. It cannot tell whose number is whose: check the quote before accepting and use plain wording. General validator handling of ranged/hedged amounts remains a real-adapter gate.
+
+The mock declines paragraphs longer than 4,000 characters before amount matching. ISO and named calendar dates are masked for range/hedge detection, so a supported offer can include a dated deadline. It still extracts only base in the synthetic format; enter other fields manually.
