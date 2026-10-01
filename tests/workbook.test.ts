@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { postgresDatabase, migrate, appDatabase, type Database } from '../src/workbook/database';
+import {latestAdviceView,adviceViewRow} from '../src/advice/view-contract';
 import {AdviceService,snapshotHash} from '../src/advice/service';
 import {proposalMock} from '../src/proposals/mock';
 import {adviceMock} from '../src/advice/mock';
@@ -504,4 +505,15 @@ test('advice explanation correction references persisted before and after ids an
  const explained=await service.changes(A,c.id,saved.id);
  assert.equal(explained.summary.acceptedChanges,1);assert.equal(explained.acceptedFactsStable,false);assert.match(explained.lines.join(' '),/Corrected: base changed from GBP 50000 annually to GBP 52000 annually/);
  assert.ok(explained.eventReferences.some(r=>r.assertion_id===a.id&&r.direction==='before'));assert.ok(explained.eventReferences.some(r=>r.assertion_id===corrected.id&&r.direction==='after'));
+});
+
+test('advice view parses real service JSON latest record and history shapes',async()=>{
+ const {c,service,input}=await adviceCase(),saved=await service.generate(A,c.id,input,adviceMock);
+ const wire=(value:unknown)=>JSON.parse(JSON.stringify(value));
+ const latest=latestAdviceView.parse(wire(await service.latest(A,c.id)));
+ assert.equal(latest.latest?.id,saved.id);assert.equal(latest.latest?.content.draft,null);
+ const record=adviceViewRow.parse(wire(await service.read(A,c.id,saved.id)));assert.ok(record.content.claims.length);assert.ok(record.snapshot?.evidence.length);
+ for(const row of wire(await service.history(A,c.id)))assert.equal(adviceViewRow.parse(row).id,saved.id);
+ const missingLatest=wire(await service.latest(A,c.id));delete missingLatest.latest;assert.throws(()=>latestAdviceView.parse(missingLatest));
+ const wrongDraft=wire(await service.read(A,c.id,saved.id));delete wrongDraft.content.draft;wrongDraft.content.draft_reply=null;assert.throws(()=>adviceViewRow.parse(wrongDraft));
 });
