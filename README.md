@@ -104,6 +104,21 @@ An accepted assertion links the proposal's first evidence row; additional quotes
 
 CI now runs a headless Chromium walkthrough against the real Postgres-backed dev server and uploads `m2c-browser-walkthrough` screenshots. It creates a synthetic case, imports text, checks the pending quote and stored advisory text, accepts, and checks the accepted view. This is a functional browser check; screenshot appearance should be inspected before claiming visual acceptance.
 
+M3a server advice foundation (synthetic mock only)
+
+After accepting or manually entering a base/deadline, read `GET /api/cases/:caseId/advice` for current counters. `POST` to that route with `expectedRevision` and `expectedMaterialVersion` generates mock advice; the same snapshot and adapter version returns the existing immutable row, including concurrent calls. A changed snapshot returns 409. `GET /advice/history` lists immutable history; `GET /advice/:adviceId` includes real assertion/evidence citations and a derived stale flag. `npm run advice:smoke` requires the synthetic `TEST_DATABASE_URL` and verifies these routes on server Postgres.
+
+Default model visibility is only accepted `base` and `deadline` fields typed `counterparty_claim` or `documented_observation`. Strategic fields and free text are excluded even when relabelled as claims. `POST /advice/settings` with the two expected counters and `includePrivateConstraints` explicitly changes the per-case switch; it defaults false and increments material version. Each advice row records the switch, adapter version and SHA-256 of its captured snapshot. A partially hidden conflict group is omitted entirely rather than presenting only one member. Model visibility is separate from outbound sensitivity.
+
+Advice generation changes no accepted facts or revision. Imports now increment material version once for a new job; duplicate imports do not. Advice becomes stale on either counter changing. The default advice-history cap is 20 rows per case (configurable); repeated access to an existing snapshot remains available at the cap. Historical snapshots preserve cited values after correction.
+
+Validation requires actual same-case accepted references, full sentence coverage including questions, exact normalised amount/date support and complete open-conflict references. Amount formats remove currency decorations/thousands separators and decimal trailing zeros; `k` expands exactly, without rounding. These are pipeline regression guards, not semantic verification or negotiation-quality evaluation. Conflicted values are described as unresolved without stating one date/amount as fact. Outbound drafts have no permitted fact references in this slice: only null or a fixed generic thank-you sentence is allowed. The lexical leakage tripwire does not establish that arbitrary paraphrases are safe.
+
+M3b will add explanation, second-interaction UI and a browser walkthrough. M3a adds no advice UI. Outcome records (user action and observed result), field-registry expansion and real-model quality are deferred. The synchronous mock must become background work before a real adapter; provider/retention/consent (including private constraints), budget and hard-abort gates remain open. Nothing here authorises live data or deployment.
+
+Advice history is append-only and has no per-row cleanup in this demo. After 20 distinct snapshots the case cannot generate another advice row; existing history remains readable, and a new case is needed for further synthetic runs. History returns hashes and advice content; use the single-advice read to retrieve its full snapshot.
+
+Human-judgement limits: quarterly or twice-yearly wording, written-out figures such as “sixty thousand pounds” and relative dates such as “next Friday” are not checked by the lexical value guard. Testers must inspect citations and judge those statements; they are not scored as validator passes or advice quality. Numeric/ordinal dates and stated annual/monthly/one-time periods are checked mechanically.
 ### Fixture runner
 
 `npm run fixtures:run` replays `fixtures/CASES.json` through the extraction validator and the deterministic mock extractor and prints a per-case table with drop reason codes. Statuses are `pass`, `fail` and `unsupported_field`. "Validator replay" feeds each expected candidate back as model output, so it shows the fixture is acceptable to the validator, not that an extractor would find it. The mock column is the only extraction-accuracy signal, and the mock is a regex parser, not a model. Unknowns, conflict fields, forbidden draft values and state effects are not scored yet. `tests/fixtures.test.ts` pins the current per-case baseline, so any change in it is deliberate.
@@ -114,7 +129,7 @@ Working synthetic paste sample: `Offer: GBP 52,000 annually`. The paste-box plac
 
 The mock also declines range/hedge paragraphs rather than selecting a bound. It cannot tell whose number is whose: check the quote before accepting and use plain wording. General validator handling of ranged/hedged amounts remains a real-adapter gate.
 
-The mock declines paragraphs longer than 4,000 characters before amount matching. ISO and named calendar dates are masked for range/hedge detection, so a supported offer can include a dated deadline. It still extracts only base in the synthetic format; enter other fields manually.
+The mock declines paragraphs longer than 4,000 characters before amount matching. ISO and named calendar dates are masked for range/hedge detection, so a supported offer can include a dated deadline. It extracts base and exact named deadlines in the supported synthetic format; enter other fields manually.
 
 The second-interaction demo parser accepts `Recruiter: Offer GBP 50,000 annually; deadline 5 October.` It extracts the literal date without guessing a year. Use an offer or recruiter cue; private, first-person, hedged and range paragraphs are declined. A dated deadline may also be put in a separate paragraph with its own recruiter cue. Always check the evidence before accepting.
 
